@@ -31,11 +31,21 @@ const RETENTION_THRESHOLD = Number(process.env.RETENTION_THRESHOLD_PCT || 90);
 const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS || 120000);
 const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || '/mnt/grishcord';
 
-const versionFile = path.join(process.cwd(), '..', 'VERSION');
 let APP_VERSION = process.env.APP_VERSION || '0.0.0';
-try {
-  APP_VERSION = (await fsp.readFile(versionFile, 'utf8')).trim() || APP_VERSION;
-} catch {}
+for (const p of [
+  process.env.APP_VERSION_FILE,
+  path.join(process.cwd(), '..', 'VERSION'),
+  path.join(process.cwd(), 'VERSION'),
+  '/app/VERSION'
+].filter(Boolean)) {
+  try {
+    const candidate = (await fsp.readFile(p, 'utf8')).trim();
+    if (candidate) {
+      APP_VERSION = candidate;
+      break;
+    }
+  } catch {}
+}
 
 const spamPresets = {
   1: { burst: 3, sustained: 10, cooldown: 120 },
@@ -69,10 +79,15 @@ async function runMigrations() {
   const sql = await fsp.readFile(path.join(process.cwd(), 'migrations', '001_init.sql'), 'utf8');
   await pool.query(sql);
   await pool.query(`
-    INSERT INTO channels(name, position, archived)
-    SELECT x.name, x.position, false
-    FROM (VALUES ('general', 1), ('random', 2)) AS x(name, position)
-    WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.name = x.name)
+    INSERT INTO channels(name, kind, position, archived)
+    SELECT x.name, x.kind, x.position, false
+    FROM (VALUES
+      ('general', 'text', 1),
+      ('random', 'text', 2),
+      ('lobby-a', 'voice', 10),
+      ('lobby-b', 'voice', 11)
+    ) AS x(name, kind, position)
+    WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.name = x.name AND c.kind = x.kind)
   `);
 }
 
@@ -161,8 +176,43 @@ app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
 });
 
 app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
-  const { rows } = await pool.query('SELECT id, name, position FROM channels WHERE archived=false ORDER BY position ASC, id ASC');
+  const { rows } = await pool.query('SELECT id, name, kind, position FROM channels WHERE archived=false ORDER BY kind ASC, position ASC, id ASC');
   res.json(rows);
+});
+
+app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const kind = String(req.body.kind || 'text');
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  if (!['text', 'voice'].includes(kind)) return res.status(400).json({ error: 'invalid_kind' });
+  const pos = await pool.query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM channels WHERE kind = $1', [kind]);
+  await pool.query('INSERT INTO channels(name, kind, position, archived) VALUES ($1, $2, $3, false)', [name, kind, Number(pos.rows[0].next)]);
+  res.json({ ok: true });
+});
+
+app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const name = req.body.name === undefined ? null : String(req.body.name).trim();
+  const position = req.body.position === undefined ? null : Number(req.body.position);
+  const current = await pool.query('SELECT id FROM channels WHERE id = $1', [id]);
+  if (!current.rows[0]) return res.status(404).json({ error: 'not_found' });
+  if (name !== null) {
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    await pool.query('UPDATE channels SET name = $1 WHERE id = $2', [name, id]);
+  }
+  if (position !== null) {
+    if (!Number.isFinite(position) || position < 1) return res.status(400).json({ error: 'invalid_position' });
+    await pool.query('UPDATE channels SET position = $1 WHERE id = $2', [Math.round(position), id]);
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  await pool.query('UPDATE channels SET archived = true WHERE id = $1', [id]);
+  res.json({ ok: true });
 });
 
 app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
@@ -213,6 +263,50 @@ app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly
 app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const disabled = req.body.disabled === true;
   await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3', [disabled, Number(req.params.id), ADMIN_USERNAME]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+  const confirmUsername = String(req.body.confirmUsername || '');
+  const confirmChecked = req.body.confirmChecked === true;
+  if (!confirmChecked) return res.status(400).json({ error: 'confirm_checkbox_required' });
+
+  const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
+  const user = u.rows[0];
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  if (user.username === ADMIN_USERNAME) return res.status(400).json({ error: 'cannot_delete_admin' });
+  if (confirmUsername !== user.username) return res.status(400).json({ error: 'confirm_username_mismatch' });
+
+  const client = await pool.connect();
+  const filesToDelete = [];
+  try {
+    await client.query('BEGIN');
+
+    const uploads = await client.query('SELECT storage_name FROM uploads WHERE owner_id = $1', [id]);
+    filesToDelete.push(...uploads.rows.map((r) => r.storage_name));
+
+    await client.query('UPDATE invites SET used_by = NULL WHERE used_by = $1', [id]);
+    await client.query('DELETE FROM messages WHERE author_id = $1 OR dm_peer_id = $1', [id]);
+    await client.query('DELETE FROM uploads WHERE owner_id = $1', [id]);
+    await client.query('DELETE FROM users WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  for (const name of filesToDelete) {
+    await fsp.rm(path.join(uploadsDir, name), { force: true });
+  }
+
+  const payload = JSON.stringify({ type: 'user_deleted', data: { id } });
+  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
   res.json({ ok: true });
 });
 

@@ -31,7 +31,7 @@ Registration requires invite token + username + password + display name. Invite 
 Admin generates user-specific, single-use, expiring (default 1 hour) recovery links. Database stores only hash of recovery token. On first valid redemption/click, server immediately increments user session version, invalidating all existing sessions before password reset completion.
 
 \section{Channels, DMs, and Messages}
-One server only. Admin can create, rename, reorder, archive channels. DMs are open to all users and exposed via a dedicated DMs navigation entry; the DM list is ordered by most recent conversation activity (newest to oldest). Messages are plain text only; no markdown or HTML rendering. Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
+One server only. Admin can create, rename, reorder, and archive both text and voice channels through the Admin Settings channel editor. DMs are open to all users and exposed via a dedicated DMs navigation entry; the DM list is ordered by most recent conversation activity (newest to oldest) and refreshed in near-realtime for fast peer appearance. Messages are plain text only; no markdown or HTML rendering. Multiline message content is preserved end-to-end (including explicit newlines entered with Shift+Enter). Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
 
 \section{Images}
 Only png, jpg/jpeg, gif, and webp uploads are allowed; SVG is rejected. Server validates image signatures via magic bytes. No resizing/transcoding is performed. Images are stored under \texttt{/mnt/grishcord/uploads} with UUID-based names and require authentication to fetch. Max image size default: 15MB.
@@ -40,7 +40,7 @@ Only png, jpg/jpeg, gif, and webp uploads are allowed; SVG is rejected. Server v
 WebSocket transport provides realtime updates. Client reconnect flow fetches messages since last known id/timestamp to avoid missed messages and uses idempotent server-generated message ids.
 
 \section{Anti-spam Slider}
-Admin panel includes one-click invite generation, invite revocation, recovery key generation, user disable/enable controls, global anti-spam level, and voice bitrate controls. Anti-spam exact mapping:
+Admin panel includes one-click invite generation, invite revocation, recovery key generation, user disable/enable controls, verified user deletion (exact username re-entry + explicit checkbox), global anti-spam level, voice bitrate controls, and an explicit Admin Mode toggle that enables moderation/editor controls in the main app (including message deletion and channel editing). Anti-spam exact mapping:
 \begin{center}
 \begin{tabular}{rrrr}
 \toprule
@@ -69,10 +69,10 @@ The repository contains a canonical \texttt{VERSION} file and a human-readable r
 
 \subsection{Embedded Release Changelog (Living Summary)}
 \begin{itemize}
-  \item \textbf{0.3.10}: Immediate logout session invalidation (server-side token version bump) and reliable cookie clearing semantics.
-  \item \textbf{0.3.9}: Added working browser voice transmission (WebRTC signaling over WS), admin message deletion, multiline compose with Shift+Enter, and one-click invite generation UX.
-  \item \textbf{0.3.8}: DMs switch ordering preference and key-first admin invite/recovery outputs.
-  \item \textbf{0.3.7--0.3.1}: Sidebar/auth UX iterations, CSP-safe frontend script loading, and HTTP session-cookie reliability fixes.
+  \item \textbf{0.3.13}: Added verified user-deletion flow in Admin Settings (exact username re-entry + confirmation checkbox), with safe server-side cleanup.
+  \item \textbf{0.3.12}: Fixed runtime version display resolution and preserved Shift+Enter multiline message newlines in the timeline.
+  \item \textbf{0.3.11}: Added Admin Mode and channel editor (add/rename/reorder/archive text+voice channels), plus snappier DM list refresh behavior.
+  \item \textbf{0.3.10--0.3.1}: Sidebar/auth UX iterations, CSP-safe frontend script loading, and HTTP session-cookie reliability fixes.
 \end{itemize}
 
 \section{Security Rules}

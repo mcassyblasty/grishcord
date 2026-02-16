@@ -4,6 +4,30 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.13] - 2026-02-16
+### Added
+- Added admin user-deletion flow in Admin Settings with strong verification: exact case-sensitive username re-entry plus explicit confirmation checkbox before delete is allowed.
+
+### Changed
+- Admin user list now supports freeze/unfreeze and delete actions in one panel.
+
+### Fixed
+- Deleting a user now cleans up related rows safely (messages, uploads, invite references) and notifies connected clients.
+
+## [0.3.12] - 2026-02-16
+### Fixed
+- Top-bar app version now resolves reliably in containerized runtime by checking multiple VERSION file paths (including `/app/VERSION`) instead of a single parent-path assumption.
+- Multiline messages now preserve newlines exactly as typed (`Shift+Enter`): composer sends raw textarea content and timeline rendering uses `white-space: pre-wrap` so line breaks are visible.
+
+## [0.3.11] - 2026-02-16
+### Added
+- Added admin channel-management APIs and UI for channel editor workflows: create text/voice channels, rename channels, reorder channels, and archive channels from Admin Settings.
+- Added explicit Admin Mode toggle in Admin Settings; message delete controls are now shown only when Admin Mode is enabled.
+
+### Changed
+- Sidebar now renders voice channels dynamically from backend channel data instead of fixed lobby buttons.
+- DM list refresh is now proactive (WebSocket-triggered + periodic polling) to surface new DM peers quickly without requiring a manual page reload.
+
 ## [0.3.10] - 2026-02-16
 ### Fixed
 - Logout now immediately invalidates the active session server-side by incrementing `session_version` during `/api/logout`, preventing reuse of an existing cookie token.

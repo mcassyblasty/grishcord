@@ -15,7 +15,8 @@ const state = {
     stream: null,
     peers: new Map(),
     muted: false
-  }
+  },
+  adminMode: false
 };
 
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
@@ -34,6 +35,12 @@ function humanError(err){
   if (msg === 'session_expired' || msg === 'unauthorized') return 'Your session is not active. Please log in again.';
   if (msg === 'invalid_invite') return 'Invite token is invalid, expired, revoked, or already used.';
   if (msg === 'target_required') return 'Pick a channel or DM target first.';
+  if (msg === 'name_required') return 'Channel name is required.';
+  if (msg === 'invalid_kind') return 'Channel type must be text or voice.';
+  if (msg === 'invalid_position') return 'Position must be a positive number.';
+  if (msg === 'confirm_checkbox_required') return 'You must check the permanent-delete confirmation box.';
+  if (msg === 'confirm_username_mismatch') return 'Typed username does not match exactly (case-sensitive).';
+  if (msg === 'cannot_delete_admin') return 'The admin user cannot be deleted.';
   return msg;
 }
 
@@ -51,6 +58,8 @@ function renderMessage(m){
   const meta = document.createElement('div'); meta.className='meta';
   meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
   const body = document.createElement('div');
+  body.style.whiteSpace = 'pre-wrap';
+  body.style.wordBreak = 'break-word';
   const full = m.body || '';
   const short = full.length > 2000 ? full.slice(0,2000) : full;
   body.textContent = short;
@@ -60,7 +69,7 @@ function renderMessage(m){
     b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
     wrap.appendChild(b);
   }
-  if (state.me?.username === 'mcassyblasty') {
+  if (state.me?.username === 'mcassyblasty' && state.adminMode) {
     const del = document.createElement('button');
     del.className = 'ghost';
     del.textContent = 'Delete';
@@ -122,6 +131,16 @@ function connectWs(){
       const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
       if (n) n.remove();
     }
+    if (msg.type === 'message' && msg.data?.dm_peer_id) {
+      refreshDms().catch(() => {});
+    }
+    if (msg.type === 'user_deleted' && msg.data?.id) {
+      if (state.activeDmPeerId === msg.data.id) {
+        state.activeDmPeerId = null;
+      }
+      refreshDms().catch(() => {});
+      if (state.me?.username === 'mcassyblasty') refreshAdmin().catch(() => {});
+    }
     handleVoiceSignal(msg).catch((err) => console.warn('voice signal error', err));
   };
   state.ws.onclose = () => setTimeout(connectWs, 2000);
@@ -158,6 +177,7 @@ async function refreshAdmin(){
     return;
   }
   $('openAdminBtn').classList.remove('hidden');
+  $('adminModeToggle').checked = state.adminMode;
   const s = await api('/api/admin/state');
   $('spamLevel').value = String(s.antiSpamLevel);
   $('voiceBitrate').value = String(s.voiceBitrate);
@@ -183,12 +203,82 @@ async function refreshAdmin(){
     const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[frozen]' : ''}`;
     row.appendChild(label);
     if(u.username !== 'mcassyblasty'){
-      const btn = document.createElement('button'); btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
+      const btn = document.createElement('button');
+      btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
       btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
-      row.appendChild(btn);
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete User';
+      delBtn.onclick = ()=>{
+        const existing = row.querySelector('.deleteVerify');
+        if (existing) {
+          existing.remove();
+          return;
+        }
+        const verify = document.createElement('div');
+        verify.className = 'deleteVerify';
+        verify.style.display = 'flex';
+        verify.style.flexDirection = 'column';
+        verify.style.gap = '.4rem';
+        verify.style.width = '100%';
+        verify.style.marginTop = '.35rem';
+
+        const hint = document.createElement('div');
+        hint.className = 'small';
+        hint.textContent = `Type username exactly to delete: ${u.username}`;
+
+        const input = document.createElement('input');
+        input.placeholder = 'type exact username to confirm';
+
+        const checkRow = document.createElement('label');
+        checkRow.className = 'small';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkRow.append(checkbox, document.createTextNode(' I understand this permanently deletes this user account and related messages/uploads.'));
+
+        const actions = document.createElement('div');
+        actions.className = 'row';
+        const confirm = document.createElement('button');
+        confirm.textContent = 'Confirm Delete';
+        confirm.onclick = async()=>{
+          try {
+            await api(`/api/admin/users/${u.id}/delete`, 'POST', { confirmUsername: input.value, confirmChecked: checkbox.checked });
+            await refreshChannels();
+            await refreshDms();
+            await refreshAdmin();
+            if (state.mode === 'dm' && state.activeDmPeerId === u.id) {
+              state.activeDmPeerId = state.users[0]?.id || null;
+              if (state.activeDmPeerId) {
+                const active = state.users.find((x) => x.id === state.activeDmPeerId);
+                if (active) text($('chatHeader'), `DM: ${active.display_name}`);
+              } else {
+                state.mode = 'channel';
+                const fallback = state.channels.find((c) => c.kind !== 'voice');
+                if (fallback) {
+                  state.activeChannelId = fallback.id;
+                  text($('chatHeader'), `# ${fallback.name}`);
+                }
+              }
+              await loadMessages();
+            }
+          } catch (err) {
+            alert(`Delete user failed: ${humanError(err)}`);
+          }
+        };
+        const cancel = document.createElement('button');
+        cancel.textContent = 'Cancel';
+        cancel.onclick = ()=> verify.remove();
+        actions.append(confirm, cancel);
+
+        verify.append(hint, input, checkRow, actions);
+        row.appendChild(verify);
+      };
+
+      row.append(btn, delBtn);
     }
     userList.appendChild(row);
   }
+  renderChannelAdmin();
 }
 
 function switchSidebarView(view){
@@ -352,7 +442,7 @@ async function handleVoiceSignal(msg) {
 
 function renderNavLists(){
   const cl = $('channelList'); cl.textContent='';
-  for (const c of state.channels){
+  for (const c of state.channels.filter((x) => x.kind !== 'voice')){
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='channel' && state.activeChannelId===c.id ? 'active':''}`;
     b.textContent = `# ${c.name}`;
@@ -367,6 +457,15 @@ function renderNavLists(){
       await loadMessages();
     };
     cl.appendChild(b);
+  }
+
+  const vl = $('voiceList'); vl.textContent='';
+  for (const c of state.channels.filter((x) => x.kind === 'voice')) {
+    const b = document.createElement('button');
+    b.className = 'channel';
+    b.textContent = `🔈 ${c.name}`;
+    b.onclick = ()=> joinVoiceRoom(c.name);
+    vl.appendChild(b);
   }
 
   const dl = $('dmList'); dl.textContent='';
@@ -397,9 +496,9 @@ async function afterAuth(){
 
   state.mode = 'channel';
   state.sidebarView = 'server';
-  state.activeChannelId = state.channels[0]?.id || null;
+  state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
   state.activeDmPeerId = null;
-  text($('chatHeader'), `# ${state.channels[0]?.name || 'general'}`);
+  text($('chatHeader'), `# ${(state.channels.find((c) => c.id === state.activeChannelId) || {}).name || 'general'}`);
   setComposerEnabled(true);
 
   showApp();
@@ -408,6 +507,70 @@ async function afterAuth(){
   await loadMessages();
   connectWs();
   await refreshAdmin();
+}
+
+async function refreshDms(){
+  const prev = state.activeDmPeerId;
+  state.users = await api('/api/dms');
+  if (state.mode === 'dm' && state.users.length && !state.users.some((u)=>u.id===prev)) {
+    state.activeDmPeerId = state.users[0].id;
+  }
+  renderNavLists();
+}
+
+async function refreshChannels(){
+  const prev = state.activeChannelId;
+  state.channels = await api('/api/channels');
+  if (!state.channels.some((c)=>c.id===prev && c.kind !== 'voice')) {
+    state.activeChannelId = state.channels.find((c)=>c.kind !== 'voice')?.id || null;
+  }
+  renderNavLists();
+}
+
+function renderChannelAdmin(){
+  const list = $('channelAdminList');
+  if (!list) return;
+  list.textContent = '';
+  for (const c of state.channels) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const nameInput = document.createElement('input');
+    nameInput.value = c.name;
+    nameInput.style.minWidth = '160px';
+    const save = document.createElement('button');
+    save.textContent = 'Rename';
+    save.onclick = async()=>{
+      await api(`/api/admin/channels/${c.id}`, 'PATCH', { name: nameInput.value.trim() });
+      await refreshChannels();
+      renderChannelAdmin();
+    };
+    const up = document.createElement('button');
+    up.textContent = '↑';
+    up.onclick = async()=>{
+      await api(`/api/admin/channels/${c.id}`, 'PATCH', { position: Math.max(1, Number(c.position) - 1) });
+      await refreshChannels();
+      renderChannelAdmin();
+    };
+    const down = document.createElement('button');
+    down.textContent = '↓';
+    down.onclick = async()=>{
+      await api(`/api/admin/channels/${c.id}`, 'PATCH', { position: Number(c.position) + 1 });
+      await refreshChannels();
+      renderChannelAdmin();
+    };
+    const del = document.createElement('button');
+    del.textContent = 'Archive';
+    del.onclick = async()=>{
+      if (!confirm(`Archive ${c.kind} channel ${c.name}?`)) return;
+      await api(`/api/admin/channels/${c.id}`, 'DELETE');
+      await refreshChannels();
+      renderChannelAdmin();
+    };
+    const label = document.createElement('span');
+    label.textContent = `[${c.kind}] #${c.id}`;
+    row.append(label, nameInput, save, up, down, del);
+    list.appendChild(row);
+  }
 }
 
 async function boot(){
@@ -436,6 +599,7 @@ async function boot(){
     try { await api('/api/logout','POST',{}); } catch {}
     await leaveVoiceRoom();
     state.me = null;
+    state.adminMode = false;
     text($('meLabel'), 'Not logged in');
     $('adminOverlay').classList.add('hidden');
     showAuth('Logged out.', 'ok');
@@ -443,9 +607,9 @@ async function boot(){
 
   $('serverViewBtn').onclick = async()=>{
     switchSidebarView('server');
-    if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels[0].id;
+    if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
     state.mode = 'channel';
-    const active = state.channels.find((c) => c.id === state.activeChannelId) || state.channels[0];
+    const active = state.channels.find((c) => c.id === state.activeChannelId && c.kind !== 'voice') || state.channels.find((c) => c.kind !== 'voice');
     if (active) {
       state.activeChannelId = active.id;
       text($('chatHeader'), `# ${active.name}`);
@@ -469,8 +633,11 @@ async function boot(){
     }
   };
 
-  $('voiceLobbyABtn').onclick = ()=> joinVoiceRoom('lobby-a');
-  $('voiceLobbyBBtn').onclick = ()=> joinVoiceRoom('lobby-b');
+  $('adminModeToggle').onchange = ()=> {
+    state.adminMode = $('adminModeToggle').checked;
+    renderNavLists();
+    loadMessages().catch(()=>{});
+  };
 
   $('authActionSelect').onchange = ()=> {
     const v = $('authActionSelect').value;
@@ -534,11 +701,12 @@ async function boot(){
 
   $('composerForm').onsubmit = async(e)=>{
     e.preventDefault();
-    const body = $('msgInput').value.trim();
-    if(!body) return;
+    const rawBody = $('msgInput').value;
+    if(!rawBody.trim()) return;
     try {
-      await api('/api/messages','POST',{body,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});
+      await api('/api/messages','POST',{body: rawBody,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});
       $('msgInput').value='';
+      if (state.mode === 'dm') await refreshDms();
     } catch(err){
       alert(`Send failed: ${humanError(err)}`);
     }
@@ -578,8 +746,24 @@ async function boot(){
     } catch(err){ alert(`Settings save failed: ${humanError(err)}`); }
   };
 
+  $('addChannelBtn').onclick = async()=>{
+    try {
+      const name = $('newChannelName').value.trim();
+      const kind = $('newChannelKind').value;
+      await api('/api/admin/channels', 'POST', { name, kind });
+      $('newChannelName').value = '';
+      await refreshChannels();
+      renderChannelAdmin();
+    } catch (err) { alert(`Channel add failed: ${humanError(err)}`); }
+  };
+
   try { await afterAuth(); }
   catch { showAuth('Please log in.', 'ok'); }
+
+  setInterval(() => {
+    if (!state.me) return;
+    refreshDms().catch(() => {});
+  }, 3000);
 }
 
 boot();
