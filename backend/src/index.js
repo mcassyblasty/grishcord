@@ -114,7 +114,9 @@ app.post('/api/login', async (req, res) => {
   const user = rows[0];
   if (!user || user.disabled || !(await bcrypt.compare(password || '', user.password_hash))) return res.status(401).json({ error: 'invalid_credentials' });
   const session = jwt.sign({ sub: user.id, sv: user.session_version }, JWT_SECRET, { expiresIn: '7d' });
-  res.cookie('gc_session', session, { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true' });
+  const wantSecure = process.env.COOKIE_SECURE === 'true';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.cookie('gc_session', session, { httpOnly: true, sameSite: 'lax', secure: wantSecure && isHttps });
   res.json({ ok: true });
 });
 
