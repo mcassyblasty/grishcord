@@ -36,6 +36,7 @@ let APP_VERSION = process.env.APP_VERSION || '0.0.0';
 try {
   APP_VERSION = (await fsp.readFile(versionFile, 'utf8')).trim() || APP_VERSION;
 } catch {}
+
 const spamPresets = {
   1: { burst: 3, sustained: 10, cooldown: 120 },
   3: { burst: 5, sustained: 15, cooldown: 60 },
@@ -55,6 +56,12 @@ const token = (n = 32) => crypto.randomBytes(n).toString('hex');
 async function runMigrations() {
   const sql = await fsp.readFile(path.join(process.cwd(), 'migrations', '001_init.sql'), 'utf8');
   await pool.query(sql);
+  await pool.query(`
+    INSERT INTO channels(name, position, archived)
+    SELECT x.name, x.position, false
+    FROM (VALUES ('general', 1), ('random', 2)) AS x(name, position)
+    WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.name = x.name)
+  `);
 }
 
 function auth(req, res, next) {
@@ -130,6 +137,16 @@ app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
   res.json(rows[0]);
 });
 
+app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, name, position FROM channels WHERE archived=false ORDER BY position ASC, id ASC');
+  res.json(rows);
+});
+
+app.get('/api/users', auth, enforceSessionVersion, async (req, res) => {
+  const { rows } = await pool.query('SELECT id, username, display_name FROM users WHERE id <> $1 ORDER BY username ASC', [req.user.sub]);
+  res.json(rows);
+});
+
 app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
   const users = await pool.query('SELECT id, username, display_name, disabled, created_at FROM users ORDER BY id ASC');
@@ -148,7 +165,7 @@ app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req,
 app.post('/api/admin/invites', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const raw = token(24);
   const ttlDays = Number(req.body.ttlDays || process.env.INVITE_TTL_DAYS || 7);
-  await pool.query('INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || " days")::interval)', [sha(raw), String(ttlDays)]);
+  await pool.query("INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || ' days')::interval)", [sha(raw), String(ttlDays)]);
   res.json({ inviteUrl: `${process.env.PUBLIC_BASE_URL}/register?token=${raw}` });
 });
 
@@ -181,7 +198,7 @@ app.post('/api/admin/recovery', auth, enforceSessionVersion, adminOnly, async (r
   const { rows } = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
   const raw = token(24);
-  await pool.query('INSERT INTO recovery_tokens(user_id, token_hash, expires_at) VALUES($1,$2, now() + interval "1 hour")', [rows[0].id, sha(raw)]);
+  await pool.query("INSERT INTO recovery_tokens(user_id, token_hash, expires_at) VALUES($1,$2, now() + interval '1 hour')", [rows[0].id, sha(raw)]);
   res.json({ recoveryUrl: `${process.env.PUBLIC_BASE_URL}/recover?token=${raw}` });
 });
 
@@ -207,16 +224,29 @@ app.post('/api/recovery/reset', async (req, res) => {
 app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   const { channelId = null, dmPeerId = null, body } = req.body;
   if (req.userDb.disabled) return res.status(403).json({ error: 'disabled' });
+  if (!channelId && !dmPeerId) return res.status(400).json({ error: 'target_required' });
   const text = String(body || '').slice(0, 10000);
-  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING *', [req.user.sub, channelId, dmPeerId, text]);
+  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING id, channel_id, dm_peer_id, body, created_at', [req.user.sub, channelId, dmPeerId, text]);
   const msg = result.rows[0];
-  const payload = JSON.stringify({ type: 'message', data: msg });
+  const enriched = { ...msg, username: req.userDb.username, display_name: req.userDb.username };
+  const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
-  res.json(msg);
+  res.json(enriched);
 });
 
 app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT m.id, m.body, m.created_at, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [Number(req.params.id)]);
+  const since = Number(req.params.id);
+  const channelId = req.query.channelId ? Number(req.query.channelId) : null;
+  const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
+
+  let rows;
+  if (channelId) {
+    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
+  } else if (dmPeerId) {
+    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.dm_peer_id = $2 ORDER BY m.id ASC LIMIT 500', [since, dmPeerId]));
+  } else {
+    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+  }
   res.json(rows);
 });
 

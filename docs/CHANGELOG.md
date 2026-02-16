@@ -4,6 +4,22 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.6] - 2026-02-16
+### Changed
+- Reworked left sidebar structure to be Discord-like sectioned navigation: static headings for `DIRECT MESSAGES` and `TEXT CHANNELS` instead of mode-switch buttons.
+- Kept channels and DMs as clickable list rows under their own headings so context switching feels familiar to Discord users.
+
+## [0.3.5] - 2026-02-16
+### Fixed
+- Repaired broken admin invite and recovery SQL interval syntax that caused backend errors in admin actions.
+- Added channel-scoped and DM-scoped message fetching/sending paths so compose actions target a concrete destination.
+
+### Changed
+- Sidebar channel items are now real buttons that switch the active channel context.
+- Added a DMs navigation button with a DM list and direct-message context switching.
+- Moved admin controls from always-visible panel to an admin-only pop-out opened from Settings.
+- Eliminated minor viewport jitter by constraining app layout to full-height non-scrolling shell.
+
 ## [0.3.4] - 2026-02-16
 ### Changed
 - Simplified login screen secondary actions into a single dropdown selector beneath login, with register/recovery forms shown contextually.

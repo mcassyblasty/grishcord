@@ -11,12 +11,15 @@
     :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8;--danger:#ef4444;--ok:#22c55e}
     body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2;--danger:#f87171;--ok:#4ade80}
     *{box-sizing:border-box}
+    html,body{height:100%;overflow:hidden}
     body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text)}
     button,input,select{font:inherit}
     button{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:.58rem .8rem;background:#0002;color:var(--text)}
     button:hover{border-color:var(--accent)}
     button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
     button.ghost{background:transparent}
+    button.channel{width:100%;text-align:left;border-radius:8px;padding:.48rem .55rem;background:transparent}
+    button.channel.active{border-color:var(--line);background:#ffffff14}
     input,select{padding:.6rem;border:1px solid var(--line);border-radius:10px;background:#0002;color:var(--text)}
     .hidden{display:none!important}
     .small{font-size:.85rem;color:var(--muted)}
@@ -25,7 +28,7 @@
     .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative}
     .spacer{flex:1}
     .menu{position:relative}
-    .menuCard{position:absolute;right:0;top:110%;min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40}
+    .menuCard{position:absolute;right:0;top:110%;min-width:240px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40;display:flex;flex-direction:column;gap:.4rem}
 
     .authWrap{padding:1rem;max-width:520px;margin:1rem auto}
     .authCard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem}
@@ -36,9 +39,10 @@
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
 
-    .app{display:grid;grid-template-columns:250px 1fr 360px;height:calc(100vh - 52px)}
-    .sidebar,.admin{background:var(--panel);padding:1rem;overflow:auto}
+    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 52px)}
+    .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line)}
     .chat{display:flex;flex-direction:column;min-height:0}
+    .chatHeader{padding:.7rem 1rem;border-bottom:1px solid var(--line)}
     .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
     .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px}
     .meta{font-size:.8rem;color:var(--muted)}
@@ -50,12 +54,14 @@
     .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
     .drawerBtn{display:none}
 
+    .overlay{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:100}
+    .modal{width:min(720px,95vw);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
+
     @media (max-width:960px){
       .app{grid-template-columns:1fr}
       .sidebar{display:none}
-      .admin{max-height:40vh}
       .drawerBtn{display:inline-block}
-      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:250px;z-index:20;height:calc(100vh - 52px)}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:260px;z-index:20;height:calc(100vh - 52px)}
     }
   </style>
 </head>
@@ -70,9 +76,10 @@
     <div class="menu hidden" id="settingsMenuWrap">
       <button id="settingsBtn" class="ghost">Settings ⚙</button>
       <div class="menuCard hidden" id="settingsMenu">
-        <div class="small" style="margin-bottom:.4rem">Appearance & Session</div>
-        <button id="themeBtn" style="width:100%;margin-bottom:.4rem">Toggle Theme</button>
-        <button id="logoutBtn" style="width:100%">Logout</button>
+        <div class="small">Appearance & Session</div>
+        <button id="themeBtn">Toggle Theme</button>
+        <button id="openAdminBtn" class="hidden">Admin Settings</button>
+        <button id="logoutBtn">Logout</button>
       </div>
     </div>
   </div>
@@ -122,21 +129,24 @@
 
   <div id="appView" class="app hidden">
     <aside class="sidebar">
-      <h3>Channels</h3>
-      <div># general</div>
-      <div># random</div>
-      <h4>Voice</h4>
-      <div>lobby-a</div><div>lobby-b</div>
+      <div class="small" style="letter-spacing:.08em;font-weight:600">DIRECT MESSAGES</div>
+      <div class="stack" id="dmList"></div>
+      <div style="height:.6rem"></div>
+      <div class="small" style="letter-spacing:.08em;font-weight:600">TEXT CHANNELS</div>
+      <div class="stack" id="channelList"></div>
     </aside>
 
     <main class="chat">
+      <div class="chatHeader" id="chatHeader"># general</div>
       <div class="msgs" id="msgs"></div>
-      <div class="composer"><input id="msgInput" maxlength="10000" placeholder="Plain-text message"><button id="sendBtn" class="primary">Send</button></div>
+      <form id="composerForm" class="composer"><input id="msgInput" maxlength="10000" placeholder="Plain-text message"><button id="sendBtn" class="primary" type="submit">Send</button></form>
     </main>
+  </div>
 
-    <aside class="admin" id="adminPanel">
-      <h3>Admin Panel</h3>
-      <div class="small">Invite generation, recovery generation, anti-spam setting, bitrate, and account freeze.</div>
+  <div id="adminOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Admin Settings</h3><button id="closeAdminBtn">Close</button></div>
+      <div class="small">Invite generation, recovery generation, anti-spam, bitrate, and account freeze.</div>
       <div class="stack">
         <div class="card">
           <h4>Create Invite</h4>
@@ -156,12 +166,11 @@
           <button id="saveSettingsBtn">Save Settings</button>
         </div>
         <div class="card"><h4>Invites</h4><div id="inviteList" class="small"></div></div>
-        <div class="card"><h4>Users</h4><div id="userList" class="small"></div></div>
+        <div class="card"><h4>Users (freeze/unfreeze)</h4><div id="userList" class="small"></div></div>
       </div>
-    </aside>
+    </div>
   </div>
 
 <script src="/app.js"></script>
-
 </body>
 </html>
