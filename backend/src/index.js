@@ -76,6 +76,18 @@ function adminOnly(req, res, next) {
   next();
 }
 
+function sanitizeSpamLevel(v) {
+  const n = Number(v);
+  if ([1, 3, 5, 7, 10].includes(n)) return n;
+  return null;
+}
+
+function sanitizeBitrate(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(16000, Math.min(64000, Math.round(n)));
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.post('/api/register', async (req, res) => {
@@ -109,11 +121,50 @@ app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
   res.json(rows[0]);
 });
 
+app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
+  const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
+  const users = await pool.query('SELECT id, username, display_name, disabled, created_at FROM users ORDER BY id ASC');
+  const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2)', ['anti_spam_level', 'voice_bitrate']);
+  const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
+  const level = Number(settingMap.anti_spam_level ?? 5);
+  res.json({
+    invites: invites.rows,
+    users: users.rows,
+    antiSpamLevel: level,
+    antiSpamEffective: spamPresets[level] || spamPresets[5],
+    voiceBitrate: Number(settingMap.voice_bitrate ?? 32000)
+  });
+});
+
 app.post('/api/admin/invites', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const raw = token(24);
   const ttlDays = Number(req.body.ttlDays || process.env.INVITE_TTL_DAYS || 7);
-  await pool.query('INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || \" days\")::interval)', [sha(raw), String(ttlDays)]);
+  await pool.query('INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || " days")::interval)', [sha(raw), String(ttlDays)]);
   res.json({ inviteUrl: `${process.env.PUBLIC_BASE_URL}/register?token=${raw}` });
+});
+
+app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  await pool.query('UPDATE invites SET revoked_at = now() WHERE id = $1 AND used_at IS NULL', [Number(req.params.id)]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const disabled = req.body.disabled === true;
+  await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3', [disabled, Number(req.params.id), ADMIN_USERNAME]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/settings', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const level = sanitizeSpamLevel(req.body.antiSpamLevel);
+  const bitrate = sanitizeBitrate(req.body.voiceBitrate);
+  if (level !== null) {
+    await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['anti_spam_level', JSON.stringify(level)]);
+  }
+  if (bitrate !== null) {
+    await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['voice_bitrate', JSON.stringify(bitrate)]);
+  }
+  const finalLevel = level ?? 5;
+  res.json({ ok: true, antiSpamLevel: finalLevel, antiSpamEffective: spamPresets[finalLevel], voiceBitrate: bitrate ?? 32000 });
 });
 
 app.post('/api/admin/recovery', auth, enforceSessionVersion, adminOnly, async (req, res) => {
@@ -121,7 +172,7 @@ app.post('/api/admin/recovery', auth, enforceSessionVersion, adminOnly, async (r
   const { rows } = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
   const raw = token(24);
-  await pool.query('INSERT INTO recovery_tokens(user_id, token_hash, expires_at) VALUES($1,$2, now() + interval \"1 hour\")', [rows[0].id, sha(raw)]);
+  await pool.query('INSERT INTO recovery_tokens(user_id, token_hash, expires_at) VALUES($1,$2, now() + interval "1 hour")', [rows[0].id, sha(raw)]);
   res.json({ recoveryUrl: `${process.env.PUBLIC_BASE_URL}/recover?token=${raw}` });
 });
 
@@ -156,7 +207,7 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
 });
 
 app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM messages WHERE id > $1 ORDER BY id ASC LIMIT 500', [Number(req.params.id)]);
+  const { rows } = await pool.query('SELECT m.id, m.body, m.created_at, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [Number(req.params.id)]);
   res.json(rows);
 });
 
