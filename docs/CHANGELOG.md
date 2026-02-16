@@ -4,6 +4,28 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.20] - 2026-02-16
+### Added
+- Added a top-right Notifications menu (next to Settings) that tracks recent DM and mention activity and supports one-click navigation to the referenced message context.
+- Added notification items with message preview + timestamp, and click-through navigation that jumps to/highlights the exact message in channel/DM history.
+
+### Changed
+- DM list entries now render with each user's configured display color for better visual identity consistency with message timelines.
+
+## [0.3.19] - 2026-02-16
+### Added
+- Mention support in composer and timeline: typing `@username`/`@displayName` now pings users, and `Tab` autocomplete completes mention handles from indexed user identities.
+- DM sidebar now includes a dedicated search field for quickly filtering direct-message peers by username or display name.
+
+### Changed
+- Messages that mention the current user are now visually highlighted for that recipient, making pings easier to notice in busy channels/DMs.
+
+## [0.3.18] - 2026-02-16
+### Fixed
+- Improved mobile layout behavior so the top bar/settings control and bottom composer remain visible and usable across narrow/tall aspect ratios, with a more reliable slide-out sidebar overlay behavior.
+- Message action controls (reply/edit/delete) are now compact and positioned at the top-right of each message card for cleaner, less intrusive interaction.
+- Voice-room join/leave behavior is now more robust: voice channel buttons reflect current state (Join vs Leave), leaving a room resets navigation cleanly, and join errors now report actionable microphone availability/permission issues.
+
 ## [0.3.17] - 2026-02-16
 ### Added
 - New user registrations now receive a randomly generated display-name color automatically, so accounts start with distinct identity coloring without admin/user setup.

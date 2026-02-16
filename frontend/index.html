@@ -33,10 +33,14 @@
     .small{font-size:.85rem;color:var(--muted)}
     .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 
-    .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative}
+    .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative;min-height:52px}
     .spacer{flex:1}
     .menu{position:relative}
-    .menuCard{position:absolute;right:0;top:110%;min-width:240px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40;display:flex;flex-direction:column;gap:.4rem}
+    .notifBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 .35rem;border-radius:999px;background:var(--danger);color:#fff;font-size:.72rem;margin-left:.25rem}
+    .notifList{display:flex;flex-direction:column;gap:.35rem;max-height:56vh;overflow:auto}
+    .notifItem{display:flex;flex-direction:column;gap:.12rem;align-items:flex-start;text-align:left;padding:.45rem .5rem;border-radius:8px}
+    .notifItem .small{line-height:1.2}
+    .menuCard{position:absolute;right:0;top:110%;min-width:240px;max-width:min(360px,calc(100vw - 1rem));background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40;display:flex;flex-direction:column;gap:.4rem}
 
     .authWrap{padding:1rem;max-width:520px;margin:1rem auto}
     .authCard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem}
@@ -47,18 +51,21 @@
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
 
-    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
-    .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line)}
-    .chat{display:flex;flex-direction:column;min-height:0}
+    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px);min-height:0}
+    .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line);min-height:0}
+    .chat{display:flex;flex-direction:column;min-height:0;overflow:hidden}
     .chatHeader{padding:.7rem 1rem;border-bottom:1px solid var(--line)}
-    .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
-    .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px}
+    .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem;min-height:0}
+    .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px;position:relative}
+    .msg.mentionPing{border-color:#f59e0b;background:rgba(245,158,11,.12)}
+    .msg.flash{outline:2px solid var(--accent);box-shadow:0 0 0 2px #0006}
     .meta{font-size:.8rem;color:var(--muted)}
     .empty{padding:1rem;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
-    .composer{padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:flex-end}
+    .composer{padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg);z-index:4}
     .composer textarea{flex:1;min-height:44px;max-height:220px;resize:vertical}
     .replyPreview{margin:.35rem .75rem 0;padding:.45rem .55rem;border:1px dashed var(--line);border-radius:8px;font-size:.85rem;color:var(--muted)}
-    .msgTools{display:flex;gap:.35rem;margin-top:.35rem}
+    .msgTools{display:flex;gap:.2rem;position:absolute;top:.3rem;right:.3rem}
+    .msgTools button{padding:.18rem .35rem;min-width:26px;min-height:24px;line-height:1;font-size:.82rem;border-radius:7px}
     .pendingImage{margin:.35rem .75rem 0;padding:.45rem;border:1px dashed var(--line);border-radius:8px;display:flex;gap:.5rem;align-items:center}
     .pendingImage img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
     .msgImage{max-width:min(360px,86vw);max-height:280px;width:auto;height:auto;border-radius:10px;border:1px solid var(--line);margin-top:.35rem;cursor:pointer;object-fit:contain;background:#0004}
@@ -73,13 +80,18 @@
     .modal{width:min(720px,95vw);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
 
     @media (max-width:960px){
-      .app{grid-template-columns:1fr}
+      .top{padding:.4rem;gap:.35rem}
+      #settingsBtn{padding:.45rem .55rem;font-size:.88rem;white-space:nowrap}
+      .app{grid-template-columns:1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
       .sidebar{display:none}
-      .drawerBtn{display:inline-block}
-      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:260px;z-index:20;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
-      .chat{height:calc(100dvh - 52px);height:calc(100vh - 52px)}
-      .msgs{padding:.65rem}
-      .composer textarea{max-height:140px}
+      .drawerBtn{display:inline-block;padding:.45rem .55rem}
+      body.showSidebar .sidebar{display:block;position:fixed;inset:52px auto 0 0;width:min(82vw,300px);z-index:60;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
+      .chat{height:calc(100dvh - 52px);height:calc(100vh - 52px);min-height:0}
+      .msgs{padding:.65rem;padding-bottom:1rem}
+      .composer{padding:.55rem .55rem calc(.55rem + env(safe-area-inset-bottom));gap:.4rem}
+      .composer textarea{max-height:120px;min-height:40px}
+      .menuCard{right:0;left:auto;max-width:calc(100vw - .75rem)}
+      .msgTools{top:.2rem;right:.2rem}
     }
   </style>
 </head>
@@ -90,6 +102,14 @@
     <span class="small" id="meLabel">Not logged in</span>
     <span class="small" id="versionLabel">v0.0.0</span>
     <span class="spacer"></span>
+
+    <div class="menu hidden" id="notifMenuWrap">
+      <button id="notifBtn" class="ghost">Notifications <span id="notifBadge" class="notifBadge hidden">0</span></button>
+      <div class="menuCard hidden" id="notifMenu">
+        <div class="small">Recent DMs & Pings</div>
+        <div id="notifList" class="notifList small"></div>
+      </div>
+    </div>
 
     <div class="menu hidden" id="settingsMenuWrap">
       <button id="settingsBtn" class="ghost">Settings ⚙</button>
@@ -171,6 +191,7 @@
 
       <div id="dmSections" class="hidden">
         <div class="small" style="letter-spacing:.08em;font-weight:600">DIRECT MESSAGES</div>
+        <input id="dmSearchInput" placeholder="Search DMs" aria-label="Search DMs" style="margin-top:.35rem">
         <div class="stack" id="dmList"></div>
       </div>
     </aside>
@@ -180,6 +201,7 @@
       <div class="msgs" id="msgs"></div>
       <div id="replyPreview" class="replyPreview hidden"></div>
       <div id="pendingImage" class="pendingImage hidden"></div>
+      <div id="mentionHint" class="small hidden" style="padding:0 .75rem .35rem"></div>
       <form id="composerForm" class="composer"><button id="attachBtn" type="button" title="Double-click to select image">+</button><input id="attachFile" type="file" accept="image/*" class="hidden"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message (Enter to send, Shift+Enter for new line)"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
     </main>
   </div>

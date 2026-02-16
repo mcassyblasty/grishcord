@@ -20,7 +20,10 @@ const state = {
   replyTo: null,
   allChannels: [],
   pendingImageFile: null,
-  pendingImagePreviewUrl: ''
+  pendingImagePreviewUrl: '',
+  dmSearchQuery: '',
+  notifications: [],
+  unreadNotifications: 0
 };
 
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
@@ -28,8 +31,8 @@ const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,c
 function text(el, v){ el.textContent = v; }
 function clearNotice(){ const n=$('authMsg'); n.classList.remove('error','ok'); n.classList.add('hidden'); text(n,''); }
 function setNotice(msg, kind='error'){ const n=$('authMsg'); n.classList.remove('hidden','error','ok'); if(kind) n.classList.add(kind); text(n,msg); }
-function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); }
-function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); clearNotice(); }
+function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); $('notifMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); }
+function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); $('notifMenuWrap').classList.remove('hidden'); clearNotice(); }
 function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
 function setBusy(btn, busy){ if(!btn) return; btn.disabled = busy; btn.textContent = busy ? 'Working...' : (btn.dataset.label || btn.textContent); }
 
@@ -133,6 +136,7 @@ function renderMessage(m){
   meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
   if (m.display_color) meta.style.color = m.display_color;
   const body = document.createElement('div');
+  if (messageMentionsMe(m.body)) wrap.classList.add('mentionPing');
   body.style.whiteSpace = 'pre-wrap';
   body.style.wordBreak = 'break-word';
   const full = m.body || '';
@@ -148,6 +152,7 @@ function renderMessage(m){
   }
   body.textContent = short;
   wrap.append(meta, body);
+  wrap.style.paddingTop = '.8rem';
   if (full.length > 2000){
     const b = document.createElement('button'); b.textContent='Read more';
     b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
@@ -240,6 +245,199 @@ function normalizeHex(v, fallback = '#FFFFFF') {
   return /^#[0-9A-F]{6}$/i.test(s) ? s.toUpperCase() : fallback;
 }
 
+
+function normalizeMentionKey(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function mentionCandidates() {
+  const out = [];
+  const seen = new Set();
+  const add = (user) => {
+    if (!user) return;
+    const username = String(user.username || '').trim();
+    const displayName = String(user.display_name || '').trim();
+    if (username) {
+      const key = normalizeMentionKey(username);
+      if (!seen.has(key)) {
+        out.push({ token: username, key, userId: Number(user.id || 0), label: `@${username}` });
+        seen.add(key);
+      }
+    }
+    if (displayName && !displayName.includes(' ')) {
+      const key = normalizeMentionKey(displayName);
+      if (!seen.has(key)) {
+        out.push({ token: displayName, key, userId: Number(user.id || 0), label: `${displayName} (@${username || 'user'})` });
+        seen.add(key);
+      }
+    }
+  };
+  add(state.me);
+  for (const u of state.users) add(u);
+  return out;
+}
+
+function currentMentionContext(input) {
+  const cursor = Number(input.selectionStart || 0);
+  const value = String(input.value || '');
+  const left = value.slice(0, cursor);
+  const match = left.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+  if (!match) return null;
+  const typed = match[2] || '';
+  const start = cursor - typed.length - 1;
+  return { start, end: cursor, typed, cursor };
+}
+
+function updateMentionHint() {
+  const hint = $('mentionHint');
+  if (!hint) return;
+  const input = $('msgInput');
+  const ctx = currentMentionContext(input);
+  if (!ctx) {
+    hint.classList.add('hidden');
+    hint.textContent = '';
+    return;
+  }
+  const typedKey = normalizeMentionKey(ctx.typed);
+  const filtered = mentionCandidates().filter((c) => !typedKey || c.key.startsWith(typedKey)).slice(0, 5);
+  if (!filtered.length) {
+    hint.classList.add('hidden');
+    hint.textContent = '';
+    return;
+  }
+  const primary = filtered[0];
+  hint.textContent = `Tab to mention @${primary.token}${filtered.length > 1 ? ` (+${filtered.length - 1} more)` : ''}`;
+  hint.classList.remove('hidden');
+}
+
+function applyMentionAutocomplete() {
+  const input = $('msgInput');
+  const ctx = currentMentionContext(input);
+  if (!ctx) return false;
+  const typedKey = normalizeMentionKey(ctx.typed);
+  if (!typedKey) return false;
+  const candidate = mentionCandidates().find((c) => c.key.startsWith(typedKey));
+  if (!candidate) return false;
+  const v = String(input.value || '');
+  input.value = `${v.slice(0, ctx.start)}@${candidate.token} ${v.slice(ctx.end)}`;
+  const pos = ctx.start + candidate.token.length + 2;
+  input.setSelectionRange(pos, pos);
+  updateMentionHint();
+  return true;
+}
+
+function messageMentionsMe(body) {
+  const textBody = String(body || '');
+  if (!textBody) return false;
+  const keys = new Set();
+  const add = (v) => { const k = normalizeMentionKey(v); if (k) keys.add(k); };
+  add(state.me?.username);
+  add(state.me?.display_name);
+  if (!keys.size) return false;
+  const re = /(^|\s)@([A-Za-z0-9_.-]+)/g;
+  let m;
+  while ((m = re.exec(textBody)) !== null) {
+    if (keys.has(normalizeMentionKey(m[2]))) return true;
+  }
+  return false;
+}
+
+function renderNotifications() {
+  const badge = $('notifBadge');
+  const list = $('notifList');
+  if (!badge || !list) return;
+  if (state.unreadNotifications > 0) {
+    badge.classList.remove('hidden');
+    badge.textContent = String(Math.min(99, state.unreadNotifications));
+  } else {
+    badge.classList.add('hidden');
+    badge.textContent = '0';
+  }
+  list.textContent = '';
+  if (!state.notifications.length) {
+    const empty = document.createElement('div');
+    empty.className = 'small';
+    empty.textContent = 'No recent notifications yet.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const n of state.notifications.slice(0, 30)) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'notifItem';
+    const top = document.createElement('strong');
+    top.textContent = n.title;
+    const line = document.createElement('span');
+    line.className = 'small';
+    line.textContent = n.preview;
+    const time = document.createElement('span');
+    time.className = 'small';
+    time.textContent = fmtTs(n.createdAt);
+    item.append(top, line, time);
+    item.onclick = () => openNotification(n);
+    list.appendChild(item);
+  }
+}
+
+function addNotificationFromMessage(m) {
+  if (!state.me || Number(m.author_id) === Number(state.me.id)) return;
+  const ping = messageMentionsMe(m.body);
+  const isDm = Boolean(m.dm_user_a && m.dm_user_b);
+  if (!ping && !isDm) return;
+  const meId = Number(state.me.id || 0);
+  const dmPeerId = isDm ? (Number(m.dm_user_a) === meId ? Number(m.dm_user_b) : Number(m.dm_user_a)) : null;
+  const title = ping ? `Ping from ${messageAuthorLabel(m)}` : `DM from ${messageAuthorLabel(m)}`;
+  const preview = (m.body || '').slice(0, 140) || '(attachment)';
+  state.notifications.unshift({
+    id: Number(m.id),
+    mode: isDm ? 'dm' : 'channel',
+    channelId: m.channel_id ? Number(m.channel_id) : null,
+    dmPeerId,
+    createdAt: m.created_at || new Date().toISOString(),
+    title,
+    preview
+  });
+  state.notifications = state.notifications.filter((v, i, arr) => i === arr.findIndex((x) => x.id === v.id));
+  state.notifications = state.notifications.slice(0, 60);
+  state.unreadNotifications += 1;
+  renderNotifications();
+}
+
+function focusMessageById(messageId) {
+  const id = Number(messageId);
+  if (!id) return;
+  const n = $('msgs').querySelector(`[data-message-id="${id}"]`);
+  if (!n) return;
+  n.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  n.classList.add('flash');
+  setTimeout(() => n.classList.remove('flash'), 1800);
+}
+
+async function openNotification(n) {
+  $('notifMenu').classList.add('hidden');
+  setReplyTarget(null);
+  if (n.mode === 'dm' && n.dmPeerId) {
+    switchSidebarView('dms');
+    state.mode = 'dm';
+    state.activeDmPeerId = n.dmPeerId;
+    state.activeChannelId = null;
+    const active = state.users.find((u) => Number(u.id) === Number(n.dmPeerId));
+    text($('chatHeader'), `DM: ${active?.display_name || active?.username || 'Direct Message'}`);
+  } else if (n.channelId) {
+    switchSidebarView('server');
+    state.mode = 'channel';
+    state.activeChannelId = Number(n.channelId);
+    state.activeDmPeerId = null;
+    const active = state.channels.find((c) => Number(c.id) === Number(n.channelId));
+    text($('chatHeader'), `# ${active?.name || 'channel'}`);
+  }
+  renderNavLists();
+  await loadMessages();
+  closeSidebarOnMobile();
+  focusMessageById(n.id);
+}
+
+
 function closeSidebarIfMobileOutsideClick(e) {
   if (!document.body.classList.contains('showSidebar')) return;
   if (window.innerWidth > 960) return;
@@ -287,6 +485,9 @@ function connectWs(){
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    if(msg.type === 'message' && msg.data){
+      addNotificationFromMessage(msg.data);
+    }
     if(msg.type === 'message' && msg.data && isCurrentTarget(msg.data)){
       const placeholder = $('msgs').querySelector('.empty');
       if (placeholder) placeholder.remove();
@@ -497,8 +698,9 @@ function updateVoiceStatus(extra = '') {
 }
 
 async function leaveVoiceRoom() {
-  if (!state.voice.room) return;
-  try { state.ws?.send(JSON.stringify({ type: 'voice_leave' })); } catch {}
+  if (state.voice.room) {
+    try { state.ws?.send(JSON.stringify({ type: 'voice_leave' })); } catch {}
+  }
   for (const peer of state.voice.peers.values()) {
     try { peer.pc.close(); } catch {}
   }
@@ -511,6 +713,16 @@ async function leaveVoiceRoom() {
   state.voice.muted = false;
   setComposerEnabled(true);
   updateVoiceStatus('Left room');
+  renderNavLists();
+  if (state.mode === 'voice') {
+    const fallback = state.channels.find((c) => c.kind !== 'voice');
+    if (fallback) {
+      state.mode = 'channel';
+      state.activeChannelId = fallback.id;
+      text($('chatHeader'), `# ${fallback.name}`);
+      await loadMessages();
+    }
+  }
 }
 
 function peerConnectionFor(targetUserId) {
@@ -538,14 +750,20 @@ function peerConnectionFor(targetUserId) {
 }
 
 async function joinVoiceRoom(room) {
+  const rejoiningSameRoom = state.voice.room === room;
+  if (rejoiningSameRoom) {
+    await leaveVoiceRoom();
+    return;
+  }
   await leaveVoiceRoom();
   showVoicePlaceholder(room);
   try {
-    if (navigator.mediaDevices?.getUserMedia) {
-      state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } else {
-      state.voice.stream = new MediaStream();
-      updateVoiceStatus('Joined in listen-only mode (mic unavailable on this browser/origin).');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Microphone access is unavailable on this browser/origin. Use HTTPS (or localhost) and allow mic permissions.');
+    }
+    state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (!state.voice.stream.getAudioTracks().length) {
+      throw new Error('No microphone track was provided by the browser.');
     }
     state.voice.room = room;
     state.ws?.send(JSON.stringify({ type: 'voice_join', room }));
@@ -561,11 +779,18 @@ async function joinVoiceRoom(room) {
     };
     const leave = document.createElement('button');
     leave.textContent = 'Leave Voice';
-    leave.onclick = leaveVoiceRoom;
+    leave.onclick = () => leaveVoiceRoom();
     btnRow.append(mute, leave);
     $('msgs').appendChild(btnRow);
-    updateVoiceStatus('Connected');
+    updateVoiceStatus('Connected (microphone active)');
+    renderNavLists();
   } catch (err) {
+    if (state.voice.stream) {
+      for (const t of state.voice.stream.getTracks()) t.stop();
+      state.voice.stream = null;
+    }
+    state.voice.room = null;
+    renderNavLists();
     updateVoiceStatus('Mic permission denied or unavailable');
     alert(`Voice join failed: ${err.message || err}`);
   }
@@ -645,18 +870,26 @@ function renderNavLists(){
   const vl = $('voiceList'); vl.textContent='';
   for (const c of state.channels.filter((x) => x.kind === 'voice')) {
     const b = document.createElement('button');
-    b.className = 'channel';
-    b.textContent = `🔈 ${c.name}`;
+    const activeVoice = state.voice.room === c.name;
+    b.className = `channel ${activeVoice ? 'active' : ''}`;
+    b.textContent = `${activeVoice ? '🔊 Leave' : '🔈 Join'} ${c.name}`;
+    b.title = activeVoice ? `Leave ${c.name}` : `Join ${c.name}`;
     b.onclick = ()=> joinVoiceRoom(c.name);
     vl.appendChild(b);
   }
 
   const dl = $('dmList'); dl.textContent='';
-  for (const u of state.users){
+  const dmSearch = normalizeMentionKey(state.dmSearchQuery);
+  const dmUsers = state.users.filter((u) => {
+    if (!dmSearch) return true;
+    return normalizeMentionKey(u.username).includes(dmSearch) || normalizeMentionKey(u.display_name).includes(dmSearch);
+  });
+  for (const u of dmUsers){
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='dm' && state.activeDmPeerId===u.id ? 'active':''}`;
     b.textContent = `${u.display_name} (@${u.username})`;
     b.style.opacity='0.96';
+    if (/^#[0-9A-F]{6}$/i.test(String(u.display_color || ''))) b.style.color = String(u.display_color).toUpperCase();
     b.onclick = async()=>{
       state.mode='dm';
       setReplyTarget(null);
@@ -682,6 +915,11 @@ async function afterAuth(){
   $('accountDisplayColorHex').value = color;
   state.channels = await api('/api/channels');
   state.users = await api('/api/dms');
+  state.dmSearchQuery = '';
+  state.notifications = [];
+  state.unreadNotifications = 0;
+  renderNotifications();
+  if ($('dmSearchInput')) $('dmSearchInput').value = '';
 
   state.mode = 'channel';
   state.sidebarView = 'server';
@@ -781,9 +1019,23 @@ async function boot(){
   await loadVersion();
 
   $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
-  $('settingsBtn').onclick = ()=> $('settingsMenu').classList.toggle('hidden');
+  $('notifBtn').onclick = ()=> {
+    const menu = $('notifMenu');
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden');
+    $('settingsMenu').classList.add('hidden');
+    if (willOpen) {
+      state.unreadNotifications = 0;
+      renderNotifications();
+    }
+  };
+  $('settingsBtn').onclick = ()=> {
+    $('settingsMenu').classList.toggle('hidden');
+    $('notifMenu').classList.add('hidden');
+  };
   document.addEventListener('click', (e)=>{
     if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
+    if (!$('notifMenuWrap').contains(e.target)) $('notifMenu').classList.add('hidden');
     closeSidebarIfMobileOutsideClick(e);
   });
 
@@ -839,6 +1091,14 @@ async function boot(){
     }
   });
 
+  if ($('dmSearchInput')) $('dmSearchInput').addEventListener('input', () => {
+    state.dmSearchQuery = $('dmSearchInput').value || '';
+    renderNavLists();
+  });
+
+  $('msgInput').addEventListener('input', updateMentionHint);
+  $('msgInput').addEventListener('click', updateMentionHint);
+
   $('imageLightbox').onclick = (e)=> { if (e.target === $('imageLightbox')) closeLightbox(); };
 
   $('themeBtn').onclick = ()=>{
@@ -857,6 +1117,9 @@ async function boot(){
     state.me = null;
     setReplyTarget(null);
     state.adminMode = false;
+    state.notifications = [];
+    state.unreadNotifications = 0;
+    renderNotifications();
     text($('meLabel'), 'Not logged in');
     $('adminOverlay').classList.add('hidden');
     showAuth('Logged out.', 'ok');
@@ -973,6 +1236,7 @@ async function boot(){
       }
       await api('/api/messages','POST',{body: rawBody,replyToId,uploadIds,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});
       $('msgInput').value='';
+      updateMentionHint();
       setReplyTarget(null);
       clearPendingImage();
       if (state.mode === 'dm') await refreshDms();
@@ -982,6 +1246,12 @@ async function boot(){
   };
 
   $('msgInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      if (applyMentionAutocomplete()) {
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       $('composerForm').requestSubmit();

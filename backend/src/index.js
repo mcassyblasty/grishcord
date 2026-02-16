@@ -260,7 +260,7 @@ app.delete('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, as
 
 app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
   const { rows } = await pool.query(`
-    SELECT u.id, u.username, u.display_name,
+    SELECT u.id, u.username, u.display_name, u.display_color,
            MAX(m.created_at) AS last_message_at
     FROM users u
     LEFT JOIN messages m
@@ -270,7 +270,7 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
         (m.author_id = u.id AND m.dm_peer_id = $1)
       )
     WHERE u.id <> $1
-    GROUP BY u.id, u.username, u.display_name
+    GROUP BY u.id, u.username, u.display_name, u.display_color
     ORDER BY last_message_at DESC NULLS LAST, u.username ASC
   `, [req.user.sub]);
   res.json(rows);
