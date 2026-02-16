@@ -6,9 +6,16 @@ const state = {
   ws: null,
   channels: [],
   users: [],
+  sidebarView: 'server',
   mode: 'channel',
   activeChannelId: null,
-  activeDmPeerId: null
+  activeDmPeerId: null,
+  voice: {
+    room: null,
+    stream: null,
+    peers: new Map(),
+    muted: false
+  }
 };
 
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
@@ -40,6 +47,7 @@ async function api(path, method='GET', body){
 
 function renderMessage(m){
   const wrap = document.createElement('div'); wrap.className='msg';
+  wrap.dataset.messageId = String(m.id);
   const meta = document.createElement('div'); meta.className='meta';
   meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
   const body = document.createElement('div');
@@ -52,12 +60,30 @@ function renderMessage(m){
     b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
     wrap.appendChild(b);
   }
+  if (state.me?.username === 'mcassyblasty') {
+    const del = document.createElement('button');
+    del.className = 'ghost';
+    del.textContent = 'Delete';
+    del.onclick = async () => {
+      if (!confirm('Delete this message?')) return;
+      try {
+        await api(`/api/messages/${m.id}`, 'DELETE');
+        wrap.remove();
+      } catch (err) {
+        alert(`Delete failed: ${humanError(err)}`);
+      }
+    };
+    wrap.appendChild(del);
+  }
   $('msgs').appendChild(wrap);
 }
 
 function isCurrentTarget(m){
   if (state.mode === 'channel') return Number(m.channel_id) === Number(state.activeChannelId);
-  return Number(m.dm_peer_id) === Number(state.activeDmPeerId);
+  if (state.mode === 'dm') {
+    return Number(m.dm_peer_id) === Number(state.activeDmPeerId) || Number(m.author_id) === Number(state.activeDmPeerId);
+  }
+  return false;
 }
 
 async function loadMessages(){
@@ -92,6 +118,11 @@ function connectWs(){
       state.lastId = Math.max(state.lastId, Number(msg.data.id || 0));
       $('msgs').scrollTop = $('msgs').scrollHeight;
     }
+    if (msg.type === 'message_deleted' && msg.data?.id) {
+      const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
+      if (n) n.remove();
+    }
+    handleVoiceSignal(msg).catch((err) => console.warn('voice signal error', err));
   };
   state.ws.onclose = () => setTimeout(connectWs, 2000);
 }
@@ -113,6 +144,12 @@ function applyTheme(theme){
 function setSpamEffective(level){
   const p = spamMap[level] || spamMap[5];
   text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
+}
+
+function setComposerEnabled(enabled, placeholder = 'Plain-text message (Enter to send, Shift+Enter for new line)') {
+  $('msgInput').disabled = !enabled;
+  $('sendBtn').disabled = !enabled;
+  $('msgInput').placeholder = placeholder;
 }
 
 async function refreshAdmin(){
@@ -154,6 +191,165 @@ async function refreshAdmin(){
   }
 }
 
+function switchSidebarView(view){
+  state.sidebarView = view;
+  const server = view === 'server';
+  $('serverSections').classList.toggle('hidden', !server);
+  $('dmSections').classList.toggle('hidden', server);
+  $('serverViewBtn').classList.toggle('active', server);
+  $('dmViewBtn').classList.toggle('active', !server);
+}
+
+function showVoicePlaceholder(name){
+  state.mode = 'voice';
+  state.activeChannelId = null;
+  state.activeDmPeerId = null;
+  text($('chatHeader'), `Voice: ${name}`);
+  $('msgs').textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  empty.textContent = `Joining voice room ${name}… allow microphone access if prompted.`;
+  $('msgs').appendChild(empty);
+  setComposerEnabled(false, `You are in ${name} voice. Text sending is disabled here.`);
+}
+
+function ensureVoiceStatus() {
+  let box = $('voiceStatus');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'voiceStatus';
+    box.className = 'small';
+    $('chatHeader').insertAdjacentElement('afterend', box);
+  }
+  return box;
+}
+
+function updateVoiceStatus(extra = '') {
+  const connected = state.voice.room ? `Connected: ${state.voice.room}` : 'Not connected to voice';
+  const peers = `Peers: ${state.voice.peers.size}`;
+  text(ensureVoiceStatus(), [connected, peers, extra].filter(Boolean).join(' · '));
+}
+
+async function leaveVoiceRoom() {
+  if (!state.voice.room) return;
+  try { state.ws?.send(JSON.stringify({ type: 'voice_leave' })); } catch {}
+  for (const peer of state.voice.peers.values()) {
+    try { peer.pc.close(); } catch {}
+  }
+  state.voice.peers.clear();
+  if (state.voice.stream) {
+    for (const t of state.voice.stream.getTracks()) t.stop();
+    state.voice.stream = null;
+  }
+  state.voice.room = null;
+  state.voice.muted = false;
+  setComposerEnabled(true);
+  updateVoiceStatus('Left room');
+}
+
+function peerConnectionFor(targetUserId) {
+  if (state.voice.peers.has(targetUserId)) return state.voice.peers.get(targetUserId);
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+  });
+  const audio = new Audio();
+  audio.autoplay = true;
+  audio.playsInline = true;
+  const remote = new MediaStream();
+  audio.srcObject = remote;
+
+  pc.ontrack = (ev) => { for (const t of ev.streams[0].getTracks()) remote.addTrack(t); };
+  pc.onicecandidate = (ev) => {
+    if (!ev.candidate) return;
+    state.ws?.send(JSON.stringify({ type: 'voice_ice', targetUserId, candidate: ev.candidate }));
+  };
+
+  const peer = { pc, audio };
+  state.voice.peers.set(targetUserId, peer);
+  for (const t of state.voice.stream?.getTracks?.() || []) pc.addTrack(t, state.voice.stream);
+  updateVoiceStatus();
+  return peer;
+}
+
+async function joinVoiceRoom(room) {
+  await leaveVoiceRoom();
+  showVoicePlaceholder(room);
+  try {
+    state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    state.voice.room = room;
+    state.ws?.send(JSON.stringify({ type: 'voice_join', room }));
+    const btnRow = document.createElement('div');
+    btnRow.className = 'row';
+    const mute = document.createElement('button');
+    mute.textContent = 'Mute';
+    mute.onclick = () => {
+      state.voice.muted = !state.voice.muted;
+      for (const t of state.voice.stream.getAudioTracks()) t.enabled = !state.voice.muted;
+      mute.textContent = state.voice.muted ? 'Unmute' : 'Mute';
+      updateVoiceStatus(state.voice.muted ? 'Muted' : 'Unmuted');
+    };
+    const leave = document.createElement('button');
+    leave.textContent = 'Leave Voice';
+    leave.onclick = leaveVoiceRoom;
+    btnRow.append(mute, leave);
+    $('msgs').appendChild(btnRow);
+    updateVoiceStatus('Connected');
+  } catch (err) {
+    updateVoiceStatus('Mic permission denied or unavailable');
+    alert(`Voice join failed: ${err.message || err}`);
+  }
+}
+
+async function handleVoiceSignal(msg) {
+  if (!msg || !msg.type) return;
+  if (!['voice_peer_joined', 'voice_offer', 'voice_answer', 'voice_ice', 'voice_peer_left'].includes(msg.type)) return;
+  const data = msg.data || {};
+  if (!state.voice.room) return;
+
+  if (msg.type === 'voice_peer_left') {
+    const peer = state.voice.peers.get(Number(data.userId));
+    if (peer) {
+      try { peer.pc.close(); } catch {}
+      state.voice.peers.delete(Number(data.userId));
+      updateVoiceStatus();
+    }
+    return;
+  }
+
+  if (msg.type === 'voice_peer_joined') {
+    const targetUserId = Number(data.userId);
+    if (!targetUserId || targetUserId === state.me?.id) return;
+    if (Number(state.me?.id) < targetUserId) {
+      const peer = peerConnectionFor(targetUserId);
+      const offer = await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      state.ws?.send(JSON.stringify({ type: 'voice_offer', targetUserId, sdp: offer }));
+    }
+    return;
+  }
+
+  const fromUserId = Number(data.fromUserId);
+  if (!fromUserId) return;
+  const peer = peerConnectionFor(fromUserId);
+
+  if (msg.type === 'voice_offer' && data.sdp) {
+    await peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const answer = await peer.pc.createAnswer();
+    await peer.pc.setLocalDescription(answer);
+    state.ws?.send(JSON.stringify({ type: 'voice_answer', targetUserId: fromUserId, sdp: answer }));
+    return;
+  }
+
+  if (msg.type === 'voice_answer' && data.sdp) {
+    await peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    return;
+  }
+
+  if (msg.type === 'voice_ice' && data.candidate) {
+    try { await peer.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+  }
+}
+
 function renderNavLists(){
   const cl = $('channelList'); cl.textContent='';
   for (const c of state.channels){
@@ -162,9 +358,11 @@ function renderNavLists(){
     b.textContent = `# ${c.name}`;
     b.onclick = async()=>{
       state.mode='channel';
+      switchSidebarView('server');
       state.activeChannelId = c.id;
       state.activeDmPeerId = null;
       text($('chatHeader'), `# ${c.name}`);
+      setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
     };
@@ -179,9 +377,11 @@ function renderNavLists(){
     b.style.opacity='0.96';
     b.onclick = async()=>{
       state.mode='dm';
+      switchSidebarView('dms');
       state.activeDmPeerId = u.id;
       state.activeChannelId = null;
       text($('chatHeader'), `DM: ${u.display_name}`);
+      setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
     };
@@ -193,14 +393,17 @@ async function afterAuth(){
   state.me = await api('/api/me');
   text($('meLabel'), `@${state.me.username}`);
   state.channels = await api('/api/channels');
-  state.users = await api('/api/users');
+  state.users = await api('/api/dms');
 
   state.mode = 'channel';
+  state.sidebarView = 'server';
   state.activeChannelId = state.channels[0]?.id || null;
   state.activeDmPeerId = null;
   text($('chatHeader'), `# ${state.channels[0]?.name || 'general'}`);
+  setComposerEnabled(true);
 
   showApp();
+  switchSidebarView('server');
   renderNavLists();
   await loadMessages();
   connectWs();
@@ -231,11 +434,43 @@ async function boot(){
 
   $('logoutBtn').onclick = async()=>{
     try { await api('/api/logout','POST',{}); } catch {}
+    await leaveVoiceRoom();
     state.me = null;
     text($('meLabel'), 'Not logged in');
     $('adminOverlay').classList.add('hidden');
     showAuth('Logged out.', 'ok');
   };
+
+  $('serverViewBtn').onclick = async()=>{
+    switchSidebarView('server');
+    if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels[0].id;
+    state.mode = 'channel';
+    const active = state.channels.find((c) => c.id === state.activeChannelId) || state.channels[0];
+    if (active) {
+      state.activeChannelId = active.id;
+      text($('chatHeader'), `# ${active.name}`);
+      setComposerEnabled(true);
+      renderNavLists();
+      await loadMessages();
+    }
+  };
+
+  $('dmViewBtn').onclick = async()=>{
+    switchSidebarView('dms');
+    state.mode = 'dm';
+    if (!state.activeDmPeerId && state.users.length) state.activeDmPeerId = state.users[0].id;
+    const active = state.users.find((u) => u.id === state.activeDmPeerId) || state.users[0];
+    if (active) {
+      state.activeDmPeerId = active.id;
+      text($('chatHeader'), `DM: ${active.display_name}`);
+      setComposerEnabled(true);
+      renderNavLists();
+      await loadMessages();
+    }
+  };
+
+  $('voiceLobbyABtn').onclick = ()=> joinVoiceRoom('lobby-a');
+  $('voiceLobbyBBtn').onclick = ()=> joinVoiceRoom('lobby-b');
 
   $('authActionSelect').onchange = ()=> {
     const v = $('authActionSelect').value;
@@ -309,11 +544,19 @@ async function boot(){
     }
   };
 
+  $('msgInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      $('composerForm').requestSubmit();
+    }
+  });
+
   $('createInviteBtn').onclick = async()=>{
     try {
-      const ttl = Number($('ttlDays').value || 7);
-      const r = await api('/api/admin/invites','POST',{ttlDays:ttl});
-      text($('inviteOut'), r.inviteUrl || '');
+      const r = await api('/api/admin/invites','POST',{});
+      const key = r.inviteKey || '';
+      const url = r.inviteUrl || '';
+      text($('inviteOut'), key ? `Invite key: ${key}${url ? `\nURL: ${url}` : ''}` : 'Invite generation returned no key.');
       await refreshAdmin();
     } catch(err){ alert(`Invite generation failed: ${humanError(err)}`); }
   };
@@ -321,7 +564,9 @@ async function boot(){
   $('genRecoveryBtn').onclick = async()=>{
     try {
       const r = await api('/api/admin/recovery','POST',{username:$('recoveryUser').value.trim()});
-      text($('recoveryOut'), r.recoveryUrl || '');
+      const key = r.recoveryKey || '';
+      const url = r.recoveryUrl || '';
+      text($('recoveryOut'), key ? `Recovery key: ${key}${url ? `\nURL: ${url}` : ''}` : 'Recovery generation returned no key.');
     } catch(err){ alert(`Recovery generation failed: ${humanError(err)}`); }
   };
 

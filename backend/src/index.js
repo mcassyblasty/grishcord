@@ -53,6 +53,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX
 const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
 const token = (n = 32) => crypto.randomBytes(n).toString('hex');
 
+function parseCookieHeader(raw = '') {
+  const out = {};
+  for (const part of String(raw).split(';')) {
+    const i = part.indexOf('=');
+    if (i <= 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (k) out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
 async function runMigrations() {
   const sql = await fsp.readFile(path.join(process.cwd(), 'migrations', '001_init.sql'), 'utf8');
   await pool.query(sql);
@@ -101,6 +113,12 @@ function sanitizeBitrate(v) {
   return Math.max(16000, Math.min(64000, Math.round(n)));
 }
 
+function sessionCookieOptions(req) {
+  const wantSecure = process.env.COOKIE_SECURE === 'true';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  return { httpOnly: true, sameSite: 'lax', secure: wantSecure && isHttps, path: '/' };
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true, version: APP_VERSION }));
 app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
 
@@ -121,14 +139,19 @@ app.post('/api/login', async (req, res) => {
   const user = rows[0];
   if (!user || user.disabled || !(await bcrypt.compare(password || '', user.password_hash))) return res.status(401).json({ error: 'invalid_credentials' });
   const session = jwt.sign({ sub: user.id, sv: user.session_version }, JWT_SECRET, { expiresIn: '7d' });
-  const wantSecure = process.env.COOKIE_SECURE === 'true';
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.cookie('gc_session', session, { httpOnly: true, sameSite: 'lax', secure: wantSecure && isHttps });
+  res.cookie('gc_session', session, sessionCookieOptions(req));
   res.json({ ok: true });
 });
 
-app.post('/api/logout', (_req, res) => {
-  res.clearCookie('gc_session');
+app.post('/api/logout', async (req, res) => {
+  try {
+    const raw = req.cookies.gc_session;
+    if (raw) {
+      const data = jwt.verify(raw, JWT_SECRET);
+      await pool.query('UPDATE users SET session_version = session_version + 1 WHERE id = $1', [data.sub]);
+    }
+  } catch {}
+  res.clearCookie('gc_session', sessionCookieOptions(req));
   res.json({ ok: true });
 });
 
@@ -142,8 +165,21 @@ app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
   res.json(rows);
 });
 
-app.get('/api/users', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT id, username, display_name FROM users WHERE id <> $1 ORDER BY username ASC', [req.user.sub]);
+app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT u.id, u.username, u.display_name,
+           MAX(m.created_at) AS last_message_at
+    FROM users u
+    LEFT JOIN messages m
+      ON (
+        (m.author_id = $1 AND m.dm_peer_id = u.id)
+        OR
+        (m.author_id = u.id AND m.dm_peer_id = $1)
+      )
+    WHERE u.id <> $1
+    GROUP BY u.id, u.username, u.display_name
+    ORDER BY last_message_at DESC NULLS LAST, u.username ASC
+  `, [req.user.sub]);
   res.json(rows);
 });
 
@@ -164,9 +200,9 @@ app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req,
 
 app.post('/api/admin/invites', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const raw = token(24);
-  const ttlDays = Number(req.body.ttlDays || process.env.INVITE_TTL_DAYS || 7);
+  const ttlDays = Number(process.env.INVITE_TTL_DAYS || 7);
   await pool.query("INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || ' days')::interval)", [sha(raw), String(ttlDays)]);
-  res.json({ inviteUrl: `${process.env.PUBLIC_BASE_URL}/register?token=${raw}` });
+  res.json({ inviteKey: raw, inviteUrl: `${process.env.PUBLIC_BASE_URL || ''}/register?token=${raw}` });
 });
 
 app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly, async (req, res) => {
@@ -199,7 +235,7 @@ app.post('/api/admin/recovery', auth, enforceSessionVersion, adminOnly, async (r
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
   const raw = token(24);
   await pool.query("INSERT INTO recovery_tokens(user_id, token_hash, expires_at) VALUES($1,$2, now() + interval '1 hour')", [rows[0].id, sha(raw)]);
-  res.json({ recoveryUrl: `${process.env.PUBLIC_BASE_URL}/recover?token=${raw}` });
+  res.json({ recoveryKey: raw, recoveryUrl: `${process.env.PUBLIC_BASE_URL || ''}/recover?token=${raw}` });
 });
 
 app.post('/api/recovery/redeem', async (req, res) => {
@@ -226,12 +262,22 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   if (req.userDb.disabled) return res.status(403).json({ error: 'disabled' });
   if (!channelId && !dmPeerId) return res.status(400).json({ error: 'target_required' });
   const text = String(body || '').slice(0, 10000);
-  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING id, channel_id, dm_peer_id, body, created_at', [req.user.sub, channelId, dmPeerId, text]);
+  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING id, author_id, channel_id, dm_peer_id, body, created_at', [req.user.sub, channelId, dmPeerId, text]);
   const msg = result.rows[0];
-  const enriched = { ...msg, username: req.userDb.username, display_name: req.userDb.username };
+  const enriched = { ...msg, username: req.userDb.username, display_name: req.userDb.display_name };
   const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
   res.json(enriched);
+});
+
+app.delete('/api/messages/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const r = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'not_found' });
+  const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
+  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+  res.json({ ok: true });
 });
 
 app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
@@ -241,11 +287,21 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
 
   let rows;
   if (channelId) {
-    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
+    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
   } else if (dmPeerId) {
-    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.dm_peer_id = $2 ORDER BY m.id ASC LIMIT 500', [since, dmPeerId]));
+    ({ rows } = await pool.query(`
+      SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id,
+             CASE WHEN m.author_id = $2 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
+             u.username, u.display_name
+      FROM messages m
+      JOIN users u ON u.id = m.author_id
+      WHERE m.id > $1
+        AND ((m.author_id = $2 AND m.dm_peer_id = $3) OR (m.author_id = $3 AND m.dm_peer_id = $2))
+      ORDER BY m.id ASC
+      LIMIT 500
+    `, [since, req.user.sub, dmPeerId]));
   } else {
-    ({ rows } = await pool.query('SELECT m.id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
   }
   res.json(rows);
 });
@@ -273,8 +329,76 @@ app.get('/api/uploads/:id', auth, enforceSessionVersion, async (req, res) => {
   fs.createReadStream(path.join(uploadsDir, u.storage_name)).pipe(res);
 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws, req) => {
+  ws.voice = { userId: null, room: null, username: null };
+  try {
+    const cookies = parseCookieHeader(req.headers.cookie || '');
+    const raw = cookies.gc_session;
+    if (raw) {
+      const data = jwt.verify(raw, JWT_SECRET);
+      const { rows } = await pool.query('SELECT id, username, session_version, disabled FROM users WHERE id = $1', [data.sub]);
+      const u = rows[0];
+      if (u && !u.disabled && u.session_version === data.sv) {
+        ws.voice.userId = Number(u.id);
+        ws.voice.username = u.username;
+      }
+    }
+  } catch {}
+
   ws.send(JSON.stringify({ type: 'hello' }));
+
+  ws.on('message', (buf) => {
+    let msg;
+    try { msg = JSON.parse(String(buf)); } catch { return; }
+    if (!ws.voice.userId) return;
+
+    if (msg.type === 'voice_join') {
+      const room = String(msg.room || '').slice(0, 64);
+      if (!room) return;
+      ws.voice.room = room;
+      for (const c of wss.clients) {
+        if (c === ws || c.readyState !== 1) continue;
+        if (c.voice?.room === room && c.voice?.userId) {
+          c.send(JSON.stringify({ type: 'voice_peer_joined', data: { userId: ws.voice.userId, username: ws.voice.username } }));
+          ws.send(JSON.stringify({ type: 'voice_peer_joined', data: { userId: c.voice.userId, username: c.voice.username } }));
+        }
+      }
+      return;
+    }
+
+    if (msg.type === 'voice_leave') {
+      const room = ws.voice.room;
+      ws.voice.room = null;
+      if (!room) return;
+      for (const c of wss.clients) {
+        if (c.readyState !== 1 || c.voice?.room !== room || c === ws) continue;
+        c.send(JSON.stringify({ type: 'voice_peer_left', data: { userId: ws.voice.userId } }));
+      }
+      return;
+    }
+
+    if (!['voice_offer', 'voice_answer', 'voice_ice'].includes(msg.type)) return;
+    const targetUserId = Number(msg.targetUserId);
+    if (!Number.isFinite(targetUserId)) return;
+    for (const c of wss.clients) {
+      if (c.readyState !== 1 || c.voice?.userId !== targetUserId) continue;
+      c.send(JSON.stringify({
+        type: msg.type,
+        data: { fromUserId: ws.voice.userId, fromUsername: ws.voice.username, sdp: msg.sdp, candidate: msg.candidate }
+      }));
+      break;
+    }
+  });
+
+  ws.on('close', () => {
+    const room = ws.voice?.room;
+    const userId = ws.voice?.userId;
+    if (!room || !userId) return;
+    for (const c of wss.clients) {
+      if (c.readyState !== 1 || c.voice?.room !== room || c === ws) continue;
+      c.send(JSON.stringify({ type: 'voice_peer_left', data: { userId } }));
+    }
+  });
 });
 
 async function retentionSweep() {

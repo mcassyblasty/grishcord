@@ -4,6 +4,33 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.10] - 2026-02-16
+### Fixed
+- Logout now immediately invalidates the active session server-side by incrementing `session_version` during `/api/logout`, preventing reuse of an existing cookie token.
+- Cookie clearing now uses consistent cookie attributes (`httpOnly`, `sameSite=lax`, `secure` on HTTPS, `path=/`) so browser logout reliably removes the auth cookie.
+
+## [0.3.9] - 2026-02-16
+### Added
+- Implemented real in-browser voice transmission for `lobby-a` and `lobby-b` using WebRTC audio with WebSocket signaling (join/leave, mute/unmute, peer connect/disconnect status).
+- Added admin message deletion support (`DELETE /api/messages/:id`) and wired delete controls in the message timeline for the admin account.
+
+### Changed
+- Composer now supports multiline drafting: `Shift+Enter` inserts a newline, while plain `Enter` sends.
+- Simplified invite generation UI to a single "Generate" action with default server-side TTL (removed confusing numeric TTL input).
+- Fixed DM timeline targeting logic so both directions of a DM conversation are loaded reliably.
+
+## [0.3.8] - 2026-02-16
+### Changed
+- Moved `DMs` button above `Server` in the sidebar quick-switch row.
+- Invite and recovery generation now returns and displays raw shareable keys directly in admin UI (with optional URL preview), matching key-first invite/recovery workflows.
+- Added an embedded living release-summary subsection in `docs/GRISHCORD_SPEC.tex` to keep LaTeX spec changelog visibility current.
+
+## [0.3.7] - 2026-02-16
+### Changed
+- Sidebar now lands on the server view with a compact `DMs` button to switch contexts instead of listing DMs above channels by default.
+- DMs list now appears in its own view and is sorted by most recent conversation activity (newest first).
+- Added a dedicated `VOICE CHANNELS` section under text channels with lobby buttons (`lobby-a`, `lobby-b`).
+
 ## [0.3.6] - 2026-02-16
 ### Changed
 - Reworked left sidebar structure to be Discord-like sectioned navigation: static headings for `DIRECT MESSAGES` and `TEXT CHANNELS` instead of mode-switch buttons.
