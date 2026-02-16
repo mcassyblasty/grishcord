@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grishcord</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8}
+    body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text)}
+    button,input,select{font:inherit}
+    button{cursor:pointer}
+    .hidden{display:none!important}
+    .small{font-size:.85rem;color:var(--muted)}
+    .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+
+    .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative}
+    .spacer{flex:1}
+    .menu{position:relative}
+    .menuCard{position:absolute;right:0;top:110%;min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40}
+
+    .authWrap{padding:1rem;max-width:520px;margin:1rem auto}
+    .authCard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
+    .authCard h2{margin-top:0}
+    .authForm{display:flex;flex-direction:column;gap:.6rem}
+    .authForm input{padding:.6rem;border:1px solid var(--line);border-radius:8px;background:#0002;color:var(--text)}
+
+    .app{display:grid;grid-template-columns:250px 1fr 360px;height:calc(100vh - 52px)}
+    .sidebar,.admin{background:var(--panel);padding:1rem;overflow:auto}
+    .chat{display:flex;flex-direction:column;min-height:0}
+    .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+    .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px}
+    .meta{font-size:.8rem;color:var(--muted)}
+    .composer{padding:.75rem;border-top:1px solid var(--line);display:flex;gap:.5rem}
+    .composer input{flex:1;padding:.5rem;background:#0002;color:var(--text);border:1px solid var(--line);border-radius:8px}
+    .stack{display:flex;flex-direction:column;gap:.5rem;margin:.75rem 0}
+    .card{border:1px solid var(--line);border-radius:8px;padding:.6rem}
+    .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
+    .drawerBtn{display:none}
+
+    @media (max-width:960px){
+      .app{grid-template-columns:1fr}
+      .sidebar{display:none}
+      .admin{max-height:40vh}
+      .drawerBtn{display:inline-block}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:250px;z-index:20;height:calc(100vh - 52px)}
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <button class="drawerBtn" id="drawerBtn">☰</button>
+    <strong>Grishcord</strong>
+    <span class="small" id="meLabel">Not logged in</span>
+    <span class="small" id="versionLabel">v0.0.0</span>
+    <span class="spacer"></span>
+
+    <div class="menu hidden" id="settingsMenuWrap">
+      <button id="settingsBtn">Settings ⚙</button>
+      <div class="menuCard hidden" id="settingsMenu">
+        <div class="small" style="margin-bottom:.4rem">Appearance & Session</div>
+        <button id="themeBtn" style="width:100%;margin-bottom:.4rem">Toggle Theme</button>
+        <button id="logoutBtn" style="width:100%">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="authView" class="authWrap">
+    <div class="authCard">
+      <h2>Login</h2>
+      <form id="loginForm" class="authForm">
+        <input id="loginUser" placeholder="username" autocomplete="username" required>
+        <input id="loginPass" type="password" placeholder="password" autocomplete="current-password" required>
+        <button id="loginBtn" type="submit">Login</button>
+      </form>
+
+      <div style="margin-top:.75rem">
+        <button id="showRegisterBtn" type="button">Need an invite? Register</button>
+        <div id="registerPanel" class="hidden" style="margin-top:.6rem">
+          <form id="registerForm" class="authForm">
+            <input id="regInvite" placeholder="invite token" required>
+            <input id="regUser" placeholder="username" required>
+            <input id="regDisplay" placeholder="display name" required>
+            <input id="regPass" type="password" placeholder="password" required>
+            <button id="regBtn" type="submit">Register</button>
+          </form>
+        </div>
+      </div>
+
+      <div style="margin-top:.75rem">
+        <button id="showRecoveryBtn" type="button">Need password recovery?</button>
+        <div id="recoveryPanel" class="hidden" style="margin-top:.6rem">
+          <form id="redeemForm" class="authForm">
+            <input id="recoverToken" placeholder="recovery token" required>
+            <button id="redeemBtn" type="submit">Redeem Token</button>
+          </form>
+          <form id="resetForm" class="authForm" style="margin-top:.5rem">
+            <input id="newPass" type="password" placeholder="new password" required>
+            <button id="resetBtn" type="submit">Reset Password</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="authMsg" class="small" style="margin-top:.75rem"></div>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <h3>Channels</h3>
+      <div># general</div>
+      <div># random</div>
+      <h4>Voice</h4>
+      <div>lobby-a</div><div>lobby-b</div>
+    </aside>
+
+    <main class="chat">
+      <div class="msgs" id="msgs"></div>
+      <div class="composer"><input id="msgInput" maxlength="10000" placeholder="Plain-text message"><button id="sendBtn">Send</button></div>
+    </main>
+
+    <aside class="admin" id="adminPanel">
+      <h3>Admin Panel</h3>
+      <div class="small">Invite generation, recovery generation, anti-spam setting, bitrate, and account freeze.</div>
+
+      <div class="stack">
+        <div class="card">
+          <h4>Create Invite</h4>
+          <div class="row"><input id="ttlDays" type="number" value="7" min="1" max="30"><button id="createInviteBtn">Generate</button></div>
+          <div id="inviteOut" class="linkbox small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Generate Recovery Link</h4>
+          <div class="row"><input id="recoveryUser" placeholder="username"><button id="genRecoveryBtn">Generate</button></div>
+          <div id="recoveryOut" class="linkbox small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Anti-Spam + Voice Bitrate</h4>
+          <div class="row"><label>Level</label><select id="spamLevel"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
+          <div class="small" id="spamEffective"></div>
+          <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
+          <button id="saveSettingsBtn">Save Settings</button>
+        </div>
+
+        <div class="card">
+          <h4>Invites</h4>
+          <div id="inviteList" class="small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Users</h4>
+          <div id="userList" class="small"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { me:null, lastId:0, redeemId:null, ws:null };
+const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
+
+function text(el, v){ el.textContent = v; }
+function showAuth(msg=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); text($('authMsg'), msg); }
+function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); }
+function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
+function setBusy(btn, busy){ if(!btn) return; btn.disabled = busy; btn.textContent = busy ? 'Working...' : btn.dataset.label; }
+
+async function api(path, method='GET', body){
+  const res = await fetch(path,{method,credentials:'include',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function renderMessage(m){
+  const wrap = document.createElement('div'); wrap.className='msg';
+  const meta = document.createElement('div'); meta.className='meta';
+  meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
+  const body = document.createElement('div');
+  const full = m.body || '';
+  const short = full.length > 2000 ? full.slice(0,2000) : full;
+  body.textContent = short;
+  wrap.append(meta, body);
+  if (full.length > 2000){
+    const b = document.createElement('button'); b.textContent='Read more';
+    b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
+    wrap.appendChild(b);
+  }
+  $('msgs').appendChild(wrap);
+  $('msgs').scrollTop = $('msgs').scrollHeight;
+}
+
+async function loadMessages(){
+  const rows = await api(`/api/messages/since/${state.lastId}`);
+  for (const m of rows){ renderMessage(m); state.lastId = Math.max(state.lastId, Number(m.id||0)); }
+}
+
+function connectWs(){
+  if(state.ws) state.ws.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  state.ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.ws.onmessage = (e) => {
+    let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    if(msg.type === 'message' && msg.data && Number(msg.data.id) > state.lastId){
+      renderMessage(msg.data); state.lastId = Number(msg.data.id);
+    }
+  };
+  state.ws.onclose = () => setTimeout(connectWs, 2000);
+}
+
+async function loadVersion(){
+  try {
+    const r = await api('/api/version');
+    text($('versionLabel'), `v${r.version || '0.0.0'}`);
+  } catch {
+    text($('versionLabel'), 'vunknown');
+  }
+}
+
+function applyTheme(theme){
+  if(theme === 'discord') document.body.classList.add('discord');
+  else document.body.classList.remove('discord');
+}
+
+function setSpamEffective(level){
+  const p = spamMap[level] || spamMap[5];
+  text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
+}
+
+async function refreshAdmin(){
+  if (!state.me || state.me.username !== 'mcassyblasty') { $('adminPanel').classList.add('hidden'); return; }
+  $('adminPanel').classList.remove('hidden');
+  const s = await api('/api/admin/state');
+  $('spamLevel').value = String(s.antiSpamLevel);
+  $('voiceBitrate').value = String(s.voiceBitrate);
+  setSpamEffective(Number(s.antiSpamLevel));
+
+  const inviteList = $('inviteList'); inviteList.textContent='';
+  for(const i of s.invites){
+    const row = document.createElement('div'); row.className='row';
+    const label = document.createElement('span');
+    label.textContent = `#${i.id} exp:${fmtTs(i.expires_at)} used:${i.used_at ? 'yes' : 'no'} revoked:${i.revoked_at ? 'yes' : 'no'}`;
+    row.appendChild(label);
+    if(!i.used_at && !i.revoked_at){
+      const btn = document.createElement('button'); btn.textContent='Revoke';
+      btn.onclick = async()=>{ await api(`/api/admin/invites/${i.id}/revoke`,'POST',{}); await refreshAdmin(); };
+      row.appendChild(btn);
+    }
+    inviteList.appendChild(row);
+  }
+
+  const userList = $('userList'); userList.textContent='';
+  for(const u of s.users){
+    const row = document.createElement('div'); row.className='row';
+    const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[disabled]' : ''}`;
+    row.appendChild(label);
+    if(u.username !== 'mcassyblasty'){
+      const btn = document.createElement('button'); btn.textContent = u.disabled ? 'Enable' : 'Disable';
+      btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
+      row.appendChild(btn);
+    }
+    userList.appendChild(row);
+  }
+}
+
+async function afterAuth(){
+  state.me = await api('/api/me');
+  text($('meLabel'), `@${state.me.username}`);
+  $('msgs').textContent='';
+  state.lastId = 0;
+  showApp();
+  await loadMessages();
+  connectWs();
+  await refreshAdmin();
+}
+
+async function boot(){
+  for (const id of ['loginBtn','regBtn','redeemBtn','resetBtn']) {
+    const b = $(id); if (b) b.dataset.label = b.textContent;
+  }
+
+  applyTheme(localStorage.getItem('grishcord_theme') || 'oled');
+  await loadVersion();
+
+  $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
+
+  $('settingsBtn').onclick = ()=> $('settingsMenu').classList.toggle('hidden');
+  document.addEventListener('click', (e)=>{
+    if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
+  });
+
+  $('themeBtn').onclick = ()=>{
+    const next = document.body.classList.contains('discord') ? 'oled' : 'discord';
+    localStorage.setItem('grishcord_theme', next);
+    applyTheme(next);
+  };
+
+  $('logoutBtn').onclick = async()=>{
+    try { await api('/api/logout','POST',{}); } catch {}
+    state.me = null;
+    text($('meLabel'), 'Not logged in');
+    showAuth('Logged out.');
+  };
+
+  $('showRegisterBtn').onclick = ()=> $('registerPanel').classList.toggle('hidden');
+  $('showRecoveryBtn').onclick = ()=> $('recoveryPanel').classList.toggle('hidden');
+
+  $('loginForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const btn = $('loginBtn');
+    setBusy(btn, true);
+    try {
+      await api('/api/login','POST',{username:$('loginUser').value.trim(),password:$('loginPass').value});
+      await afterAuth();
+    } catch(err){
+      showAuth(`Login failed: ${err.message}`);
+    } finally { setBusy(btn, false); }
+  };
+
+  $('registerForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const btn = $('regBtn');
+    setBusy(btn, true);
+    try {
+      await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
+      showAuth('Registered. Log in now.');
+      $('registerPanel').classList.add('hidden');
+    } catch(err){
+      showAuth(`Register failed: ${err.message}`);
+    } finally { setBusy(btn, false); }
+  };
+
+  $('redeemForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const btn = $('redeemBtn');
+    setBusy(btn, true);
+    try {
+      const r = await api('/api/recovery/redeem','POST',{token:$('recoverToken').value.trim()});
+      state.redeemId = r.redeemId;
+      showAuth('Token redeemed. Set new password below.');
+    } catch(err){
+      showAuth(`Redeem failed: ${err.message}`);
+    } finally { setBusy(btn, false); }
+  };
+
+  $('resetForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const btn = $('resetBtn');
+    setBusy(btn, true);
+    try {
+      await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
+      showAuth('Password reset complete.');
+      $('recoveryPanel').classList.add('hidden');
+    } catch(err){
+      showAuth(`Reset failed: ${err.message}`);
+    } finally { setBusy(btn, false); }
+  };
+
+  $('sendBtn').onclick = async()=>{
+    const body = $('msgInput').value.trim();
+    if(!body) return;
+    try { await api('/api/messages','POST',{body}); $('msgInput').value=''; }
+    catch(err){ alert(`Send failed: ${err.message}`); }
+  };
+
+  $('createInviteBtn').onclick = async()=>{
+    try {
+      const ttl = Number($('ttlDays').value || 7);
+      const r = await api('/api/admin/invites','POST',{ttlDays:ttl});
+      text($('inviteOut'), r.inviteUrl || '');
+      await refreshAdmin();
+    } catch(err){ alert(`Invite generation failed: ${err.message}`); }
+  };
+
+  $('genRecoveryBtn').onclick = async()=>{
+    try {
+      const r = await api('/api/admin/recovery','POST',{username:$('recoveryUser').value.trim()});
+      text($('recoveryOut'), r.recoveryUrl || '');
+    } catch(err){ alert(`Recovery generation failed: ${err.message}`); }
+  };
+
+  $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
+  $('saveSettingsBtn').onclick = async()=>{
+    try {
+      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value)});
+      setSpamEffective(Number(r.antiSpamLevel));
+    } catch(err){ alert(`Settings save failed: ${err.message}`); }
+  };
+
+  try { await afterAuth(); }
+  catch { showAuth(); }
+}
+
+boot();
+</script>
+</body>
+</html>
