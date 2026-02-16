@@ -1,0 +1,73 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\title{Grishcord Canonical Specification}
+\author{Private deployment for up to 50 users}
+\date{\today}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Overview and Non-goals}
+Grishcord is a minimal, single-server, Discord-like web app for approximately 25 close friends (hard upper target: 50 users). Non-goals: multiple servers, avatars, embeds, reactions, threads, bots, markdown rendering, rich formatting, video uploads, and backup systems.
+
+\section{User Interface}
+\subsection{Layouts}
+Two responsive layouts are supported: (1) wide layout with left navigation using Discord-like section headings for Direct Messages and Text Channels with clickable rows beneath each heading, plus main chat panel; admin settings open as an admin-only pop-out from the settings menu; (2) portrait layout with channel list in a drawer/hamburger pattern and full-screen chat timeline. Authentication screen is login-first, with registration and recovery hidden behind a compact helper dropdown below the login form.
+\subsection{Themes}
+Two themes only: OLED ($\#000$ background, $\#fff$ text) and Discord-like dark palette. Theme switching is available from the in-app settings menu after login. Authentication actions provide explicit success/error feedback and wrong-password messaging.
+\subsection{Typography}
+Inter is used for readability.
+
+\section{Identity and Authentication}
+Users have immutable \texttt{username} and mutable \texttt{display\_name}. Admin is the account with username \texttt{mcassyblasty}. Sessions are JWT cookies (HttpOnly) carrying user id and session version. Secure-cookie mode is applied only on HTTPS requests so LAN HTTP testing can still authenticate correctly while preserving secure behavior under TLS.
+
+\section{Invites and Registration}
+Registration requires invite token + username + password + display name. Invite tokens are cryptographically random, single-use by default, and expiring (default 7 days). Database stores only invite token hashes.
+
+\section{Password Recovery}
+Admin generates user-specific, single-use, expiring (default 1 hour) recovery links. Database stores only hash of recovery token. On first valid redemption/click, server immediately increments user session version, invalidating all existing sessions before password reset completion.
+
+\section{Channels, DMs, and Messages}
+One server only. Admin can create, rename, reorder, archive channels. DMs are open to all users and exposed via a dedicated DMs navigation entry. Messages are plain text only; no markdown or HTML rendering. Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
+
+\section{Images}
+Only png, jpg/jpeg, gif, and webp uploads are allowed; SVG is rejected. Server validates image signatures via magic bytes. No resizing/transcoding is performed. Images are stored under \texttt{/mnt/grishcord/uploads} with UUID-based names and require authentication to fetch. Max image size default: 15MB.
+
+\section{Realtime}
+WebSocket transport provides realtime updates. Client reconnect flow fetches messages since last known id/timestamp to avoid missed messages and uses idempotent server-generated message ids.
+
+\section{Anti-spam Slider}
+Admin panel includes invite generation, invite revocation, recovery link generation, user disable/enable controls, global anti-spam level, and voice bitrate controls. Anti-spam exact mapping:
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+Level & Burst & Sustained (/min) & Cooldown (s)\\
+\midrule
+1 & 3 & 10 & 120\\
+3 & 5 & 15 & 60\\
+5 & 8 & 25 & 30\\
+7 & 12 & 40 & 15\\
+10 & 20 & 80 & 0--5\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Voice}
+Voice uses open-source LiveKit SFU and client SDK, with exactly two lobbies: \texttt{lobby-a} and \texttt{lobby-b}. Each lobby enforces max 10 participants. UI exposes join/leave, mute/unmute, and participant list. TURN uses coturn and DNS-only hostname. Admin can configure publish audio max bitrate (default 32kbps, bounded).
+
+\section{Storage-full Eviction Policy}
+Automatic retention runs periodically (default 2 minutes) and can be triggered on message send/upload. If \texttt{/mnt/grishcord} usage exceeds threshold (default 90\%), the system deletes oldest messages first until usage falls below threshold; associated image files are deleted when their message references are removed.
+
+\section{Deployment Summary}
+Docker Compose services: reverse proxy (Caddy), frontend, backend (API+WS), Postgres, LiveKit, coturn. Persistent bind mounts: \texttt{/mnt/grishcord/postgres}, \texttt{/mnt/grishcord/uploads}, and \texttt{/mnt/grishcord/config}.
+
+\section{Versioning and Change History}
+The repository contains a canonical \texttt{VERSION} file and a human-readable release history in \texttt{docs/CHANGELOG.md}. The backend exposes \texttt{/api/version} and includes version metadata in \texttt{/health} for runtime verification. Recent release families are tracked in the changelog (e.g., 0.3.1 auth UX restructure, 0.3.2 HTTP cookie/session reliability, 0.3.3 CSP-safe frontend script loading fix).
+
+\section{Security Rules}
+User content is escaped and never rendered as HTML. Linkify allows only \texttt{http://} and \texttt{https://}. SQL is parameterized. Reverse proxy sets CSP, \texttt{X-Content-Type-Options: nosniff}, and Referrer-Policy. Login/recovery endpoints are rate-limit candidates by design.
+
+\end{document}
