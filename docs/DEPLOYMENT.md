@@ -1,22 +1,25 @@
 # Grishcord Deployment
 
 ## Prerequisites
-- Docker Engine + Docker Compose plugin.
-- DNS records created (see `docs/NETWORKING.md`).
-- Host directories:
-  - `/mnt/grishcord/postgres`
-  - `/mnt/grishcord/uploads`
-  - `/mnt/grishcord/config`
+- Debian host with mounted persistent storage at `/mnt/grishcord`.
+- User `grishcord` with sudo privileges.
 
-## Environment
-1. Copy `.env.example` to `.env` and set secrets.
-2. Place config files:
-   - `/mnt/grishcord/config/livekit.yaml` (start from `infra/livekit/livekit.yaml`)
-   - `/mnt/grishcord/config/turnserver.conf` (start from `infra/coturn/turnserver.conf`)
-
-## Run
+## Fastest reliable path
+From repository root:
 ```bash
-docker compose --env-file .env up -d --build
+./scripts/fix_everything.sh
+```
+This script installs missing prerequisites, validates `/mnt/grishcord` mount, creates required subdirectories, and starts the stack with deterministic compose naming (`-p grishcord`).
+
+## Normal start
+```bash
+./scripts/run_grishcord.sh
+```
+
+## Manual compose commands (deterministic naming)
+```bash
+docker compose -p grishcord -f docker-compose.yml up -d --build
+docker compose -p grishcord -f docker-compose.yml ps
 ```
 
 ## Data persistence
@@ -27,8 +30,8 @@ All persistent data is under `/mnt/grishcord` via bind mounts:
 
 ## Update
 ```bash
-git pull
-docker compose --env-file .env up -d --build
+# after replacing repository files with a new release
+./scripts/fix_everything.sh
 ```
 
 ## Storage-full policy

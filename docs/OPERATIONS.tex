@@ -1,0 +1,64 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\title{Grishcord Operations Guide}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section{Purpose}
+This guide explains deterministic local/LAN operations for Grishcord on Debian with Docker Compose, including recovery workflows when setup is broken.
+
+\section{One-command repair and start}
+Run from repository root:
+\begin{verbatim}
+./scripts/fix_everything.sh
+\end{verbatim}
+This script is idempotent and performs:
+\begin{itemize}
+  \item prerequisite installation (Docker Engine, Compose plugin, and base tools),
+  \item Docker daemon startup,
+  \item Docker access fallback to \texttt{sudo docker} when needed,
+  \item mountpoint validation for \texttt{/mnt/grishcord} (hard fail if not mounted),
+  \item creation of \texttt{/mnt/grishcord/postgres}, \texttt{/mnt/grishcord/uploads}, \texttt{/mnt/grishcord/config},
+  \item cleanup of legacy symlink-derived project name \texttt{current},
+  \item deterministic start using \texttt{docker compose -p grishcord ... up -d --build},
+  \item running-state checks and LAN URL output.
+\end{itemize}
+
+\section{Normal start}
+After first successful repair:
+\begin{verbatim}
+./scripts/run_grishcord.sh
+\end{verbatim}
+The command starts/restarts in detached mode and prints the exact URL:
+\begin{verbatim}
+Open: http://<vm-ip>:<port>/
+\end{verbatim}
+
+\section{Verification commands}
+\begin{verbatim}
+docker compose -p grishcord -f docker-compose.yml ps
+docker compose -p grishcord -f docker-compose.yml logs --tail 200 caddy frontend backend
+\end{verbatim}
+
+\section{How LAN URL is determined}
+Scripts resolve:
+\begin{enumerate}
+  \item VM IP using \texttt{hostname -I} (first address),
+  \item Caddy host port via \texttt{docker compose -p grishcord port caddy 80}.
+\end{enumerate}
+Printed URL format is always:
+\begin{verbatim}
+http://<vm-ip>:<caddy-port>/
+\end{verbatim}
+
+\section{Common failure modes and exact fixes}
+\begin{itemize}
+  \item \textbf{Docker missing}: run \texttt{./scripts/fix_everything.sh}; it installs Docker/Compose.
+  \item \textbf{/mnt/grishcord not mounted}: mount storage properly, then rerun \texttt{fix\_everything.sh}. Script intentionally exits non-zero until mounted.
+  \item \textbf{Compose project name confusion (e.g., symlink ``current'')}: scripts force \texttt{-p grishcord} and explicitly tear down legacy \texttt{current} safely (no persistent data deletion).
+  \item \textbf{Service not reachable}: check \texttt{ps} and then inspect logs using the commands above.
+\end{itemize}
+
+\end{document}
