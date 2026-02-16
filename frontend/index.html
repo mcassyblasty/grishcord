@@ -31,7 +31,7 @@
     .authCard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem}
     .authCard h2{margin-top:0}
     .authForm{display:flex;flex-direction:column;gap:.6rem}
-    .authToggle{margin-top:.75rem;display:flex;flex-direction:column;gap:.35rem}
+    .authToggle{margin-top:.75rem;display:flex;flex-direction:column;gap:.45rem}
     .notice{margin-top:.75rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:10px;min-height:2.2rem;display:flex;align-items:center}
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
@@ -87,7 +87,13 @@
       </form>
 
       <div class="authToggle">
-        <button id="showRegisterBtn" class="ghost" type="button">Need an invite? Register</button>
+        <label for="authActionSelect" class="small">Need help signing in?</label>
+        <select id="authActionSelect" aria-label="Authentication actions">
+          <option value="none" selected>Choose an option…</option>
+          <option value="register">Need an invite? Register</option>
+          <option value="recovery">Need password recovery?</option>
+        </select>
+
         <div id="registerPanel" class="hidden" style="margin-top:.35rem">
           <form id="registerForm" class="authForm">
             <input id="regInvite" placeholder="invite token" required>
@@ -98,7 +104,6 @@
           </form>
         </div>
 
-        <button id="showRecoveryBtn" class="ghost" type="button">Need password recovery?</button>
         <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
           <form id="redeemForm" class="authForm">
             <input id="recoverToken" placeholder="recovery token" required>
@@ -111,7 +116,7 @@
         </div>
       </div>
 
-      <div id="authMsg" class="notice small"></div>
+      <div id="authMsg" class="notice small hidden" role="status" aria-live="polite"></div>
     </div>
   </div>
 
@@ -156,264 +161,7 @@
     </aside>
   </div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const state = { me:null, lastId:0, redeemId:null, ws:null };
-const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
+<script src="/app.js"></script>
 
-function text(el, v){ el.textContent = v; }
-function clearNotice(){ const n=$('authMsg'); n.classList.remove('error','ok'); text(n,''); }
-function setNotice(msg, kind='error'){ const n=$('authMsg'); n.classList.remove('error','ok'); if(kind) n.classList.add(kind); text(n,msg); }
-function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); }
-function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); clearNotice(); }
-function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
-function setBusy(btn, busy){ if(!btn) return; btn.disabled = busy; btn.textContent = busy ? 'Working...' : (btn.dataset.label || btn.textContent); }
-
-function humanError(err){
-  const msg = String(err?.message || 'unknown_error');
-  if (msg === 'invalid_credentials') return 'Wrong username or password.';
-  if (msg === 'session_expired' || msg === 'unauthorized') return 'Your session is not active. Please log in again.';
-  if (msg === 'invalid_invite') return 'Invite token is invalid, expired, revoked, or already used.';
-  return msg;
-}
-
-async function api(path, method='GET', body){
-  const res = await fetch(path,{method,credentials:'include',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
-  let data = {};
-  try { data = await res.json(); } catch {}
-  if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
-
-function renderMessage(m){
-  const wrap = document.createElement('div'); wrap.className='msg';
-  const meta = document.createElement('div'); meta.className='meta';
-  meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
-  const body = document.createElement('div');
-  const full = m.body || '';
-  const short = full.length > 2000 ? full.slice(0,2000) : full;
-  body.textContent = short;
-  wrap.append(meta, body);
-  if (full.length > 2000){
-    const b = document.createElement('button'); b.textContent='Read more';
-    b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
-    wrap.appendChild(b);
-  }
-  $('msgs').appendChild(wrap);
-}
-
-async function loadMessages(){
-  const rows = await api(`/api/messages/since/${state.lastId}`);
-  if (!rows.length) {
-    const empty = document.createElement('div');
-    empty.className='empty';
-    empty.textContent = "Welcome — you're in #general. Send your first message to get started.";
-    $('msgs').appendChild(empty);
-    return;
-  }
-  for (const m of rows){ renderMessage(m); state.lastId = Math.max(state.lastId, Number(m.id||0)); }
-  $('msgs').scrollTop = $('msgs').scrollHeight;
-}
-
-function connectWs(){
-  if(state.ws) state.ws.close();
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  state.ws = new WebSocket(`${proto}://${location.host}/ws`);
-  state.ws.onmessage = (e) => {
-    let msg; try { msg = JSON.parse(e.data); } catch { return; }
-    if(msg.type === 'message' && msg.data && Number(msg.data.id) > state.lastId){
-      const placeholder = $('msgs').querySelector('.empty');
-      if (placeholder) placeholder.remove();
-      renderMessage(msg.data);
-      state.lastId = Number(msg.data.id);
-      $('msgs').scrollTop = $('msgs').scrollHeight;
-    }
-  };
-  state.ws.onclose = () => setTimeout(connectWs, 2000);
-}
-
-async function loadVersion(){
-  try {
-    const r = await api('/api/version');
-    text($('versionLabel'), `v${r.version || '0.0.0'}`);
-  } catch {
-    text($('versionLabel'), 'vunknown');
-  }
-}
-
-function applyTheme(theme){
-  if(theme === 'discord') document.body.classList.add('discord');
-  else document.body.classList.remove('discord');
-}
-
-function setSpamEffective(level){
-  const p = spamMap[level] || spamMap[5];
-  text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
-}
-
-async function refreshAdmin(){
-  if (!state.me || state.me.username !== 'mcassyblasty') { $('adminPanel').classList.add('hidden'); return; }
-  $('adminPanel').classList.remove('hidden');
-  const s = await api('/api/admin/state');
-  $('spamLevel').value = String(s.antiSpamLevel);
-  $('voiceBitrate').value = String(s.voiceBitrate);
-  setSpamEffective(Number(s.antiSpamLevel));
-
-  const inviteList = $('inviteList'); inviteList.textContent='';
-  for(const i of s.invites){
-    const row = document.createElement('div'); row.className='row';
-    const label = document.createElement('span');
-    label.textContent = `#${i.id} exp:${fmtTs(i.expires_at)} used:${i.used_at ? 'yes' : 'no'} revoked:${i.revoked_at ? 'yes' : 'no'}`;
-    row.appendChild(label);
-    if(!i.used_at && !i.revoked_at){
-      const btn = document.createElement('button'); btn.textContent='Revoke';
-      btn.onclick = async()=>{ await api(`/api/admin/invites/${i.id}/revoke`,'POST',{}); await refreshAdmin(); };
-      row.appendChild(btn);
-    }
-    inviteList.appendChild(row);
-  }
-
-  const userList = $('userList'); userList.textContent='';
-  for(const u of s.users){
-    const row = document.createElement('div'); row.className='row';
-    const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[disabled]' : ''}`;
-    row.appendChild(label);
-    if(u.username !== 'mcassyblasty'){
-      const btn = document.createElement('button'); btn.textContent = u.disabled ? 'Enable' : 'Disable';
-      btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
-      row.appendChild(btn);
-    }
-    userList.appendChild(row);
-  }
-}
-
-async function afterAuth(){
-  state.me = await api('/api/me');
-  text($('meLabel'), `@${state.me.username}`);
-  $('msgs').textContent='';
-  state.lastId = 0;
-  showApp();
-  await loadMessages();
-  connectWs();
-  await refreshAdmin();
-}
-
-async function boot(){
-  for (const id of ['loginBtn','regBtn','redeemBtn','resetBtn']) {
-    const b = $(id); if (b) b.dataset.label = b.textContent;
-  }
-
-  applyTheme(localStorage.getItem('grishcord_theme') || 'oled');
-  await loadVersion();
-
-  $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
-  $('settingsBtn').onclick = ()=> $('settingsMenu').classList.toggle('hidden');
-  document.addEventListener('click', (e)=>{ if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden'); });
-
-  $('themeBtn').onclick = ()=>{
-    const next = document.body.classList.contains('discord') ? 'oled' : 'discord';
-    localStorage.setItem('grishcord_theme', next);
-    applyTheme(next);
-  };
-
-  $('logoutBtn').onclick = async()=>{
-    try { await api('/api/logout','POST',{}); } catch {}
-    state.me = null;
-    text($('meLabel'), 'Not logged in');
-    showAuth('Logged out.', 'ok');
-  };
-
-  $('showRegisterBtn').onclick = ()=> $('registerPanel').classList.toggle('hidden');
-  $('showRecoveryBtn').onclick = ()=> $('recoveryPanel').classList.toggle('hidden');
-
-  $('loginForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const btn = $('loginBtn');
-    setBusy(btn, true);
-    clearNotice();
-    try {
-      await api('/api/login','POST',{username:$('loginUser').value.trim(),password:$('loginPass').value});
-      await afterAuth();
-    } catch(err){
-      setNotice(`Login failed: ${humanError(err)}`, 'error');
-    } finally { setBusy(btn, false); }
-  };
-
-  $('registerForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const btn = $('regBtn');
-    setBusy(btn, true);
-    try {
-      await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
-      setNotice('Registered. Log in now.', 'ok');
-      $('registerPanel').classList.add('hidden');
-    } catch(err){
-      setNotice(`Register failed: ${humanError(err)}`, 'error');
-    } finally { setBusy(btn, false); }
-  };
-
-  $('redeemForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const btn = $('redeemBtn');
-    setBusy(btn, true);
-    try {
-      const r = await api('/api/recovery/redeem','POST',{token:$('recoverToken').value.trim()});
-      state.redeemId = r.redeemId;
-      setNotice('Token redeemed. Set new password below.', 'ok');
-    } catch(err){
-      setNotice(`Redeem failed: ${humanError(err)}`, 'error');
-    } finally { setBusy(btn, false); }
-  };
-
-  $('resetForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const btn = $('resetBtn');
-    setBusy(btn, true);
-    try {
-      await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
-      setNotice('Password reset complete.', 'ok');
-      $('recoveryPanel').classList.add('hidden');
-    } catch(err){
-      setNotice(`Reset failed: ${humanError(err)}`, 'error');
-    } finally { setBusy(btn, false); }
-  };
-
-  $('sendBtn').onclick = async()=>{
-    const body = $('msgInput').value.trim();
-    if(!body) return;
-    try { await api('/api/messages','POST',{body}); $('msgInput').value=''; }
-    catch(err){ alert(`Send failed: ${humanError(err)}`); }
-  };
-
-  $('createInviteBtn').onclick = async()=>{
-    try {
-      const ttl = Number($('ttlDays').value || 7);
-      const r = await api('/api/admin/invites','POST',{ttlDays:ttl});
-      text($('inviteOut'), r.inviteUrl || '');
-      await refreshAdmin();
-    } catch(err){ alert(`Invite generation failed: ${humanError(err)}`); }
-  };
-
-  $('genRecoveryBtn').onclick = async()=>{
-    try {
-      const r = await api('/api/admin/recovery','POST',{username:$('recoveryUser').value.trim()});
-      text($('recoveryOut'), r.recoveryUrl || '');
-    } catch(err){ alert(`Recovery generation failed: ${humanError(err)}`); }
-  };
-
-  $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
-  $('saveSettingsBtn').onclick = async()=>{
-    try {
-      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value)});
-      setSpamEffective(Number(r.antiSpamLevel));
-    } catch(err){ alert(`Settings save failed: ${humanError(err)}`); }
-  };
-
-  try { await afterAuth(); }
-  catch { showAuth(); }
-}
-
-boot();
-</script>
 </body>
 </html>

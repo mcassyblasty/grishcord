@@ -4,6 +4,20 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.4] - 2026-02-16
+### Changed
+- Simplified login screen secondary actions into a single dropdown selector beneath login, with register/recovery forms shown contextually.
+- Kept the login-first visual motif while reducing clutter from multiple standalone secondary buttons.
+
+## [0.3.3] - 2026-02-16
+### Fixed
+- Frontend interactivity bug where login/register/recovery/settings buttons appeared non-functional in production due to inline script being blocked by the reverse-proxy CSP (`script-src 'self'`).
+- Moved frontend logic into `frontend/app.js` and loaded it as a same-origin script so handlers execute correctly.
+- Removed confusing empty auth notice box by hiding it until there is real success/error text.
+
+### Changed
+- Expanded canonical spec change-history section to reference changelog usage and current release progression.
+
 ## [0.3.2] - 2026-02-16
 ### Changed
 - Fixed login session behavior for LAN/non-TLS usage by only setting a secure auth cookie when the request is actually HTTPS, preventing silent post-login session loss on HTTP.
