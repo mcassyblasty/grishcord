@@ -77,6 +77,15 @@
       <button id="settingsBtn" class="ghost">Settings ⚙</button>
       <div class="menuCard hidden" id="settingsMenu">
         <div class="small">Appearance & Session</div>
+        <div class="card" style="margin:.2rem 0">
+          <div class="small" style="margin-bottom:.35rem">Account</div>
+          <input id="accountDisplayName" placeholder="display name">
+          <div class="row" style="margin-top:.35rem">
+            <input id="accountDisplayColor" type="color" value="#ffffff" style="width:42px;padding:0;height:34px">
+            <input id="accountDisplayColorHex" placeholder="#FFFFFF" maxlength="7" style="max-width:110px">
+          </div>
+          <button id="saveAccountBtn" style="margin-top:.45rem">Save Account</button>
+        </div>
         <button id="themeBtn">Toggle Theme</button>
         <button id="openAdminBtn" class="hidden">Admin Settings</button>
         <button id="logoutBtn">Logout</button>

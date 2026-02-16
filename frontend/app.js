@@ -41,6 +41,8 @@ function humanError(err){
   if (msg === 'confirm_checkbox_required') return 'You must check the permanent-delete confirmation box.';
   if (msg === 'confirm_username_mismatch') return 'Typed username does not match exactly (case-sensitive).';
   if (msg === 'cannot_delete_admin') return 'The admin user cannot be deleted.';
+  if (msg === 'display_name_required') return 'Display name is required.';
+  if (msg === 'invalid_color') return 'Display color must be a hex color like #AABBCC.';
   return msg;
 }
 
@@ -57,6 +59,7 @@ function renderMessage(m){
   wrap.dataset.messageId = String(m.id);
   const meta = document.createElement('div'); meta.className='meta';
   meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
+  if (m.display_color) meta.style.color = m.display_color;
   const body = document.createElement('div');
   body.style.whiteSpace = 'pre-wrap';
   body.style.wordBreak = 'break-word';
@@ -90,9 +93,29 @@ function renderMessage(m){
 function isCurrentTarget(m){
   if (state.mode === 'channel') return Number(m.channel_id) === Number(state.activeChannelId);
   if (state.mode === 'dm') {
-    return Number(m.dm_peer_id) === Number(state.activeDmPeerId) || Number(m.author_id) === Number(state.activeDmPeerId);
+    const meId = Number(state.me?.id || 0);
+    const peerId = Number(state.activeDmPeerId || 0);
+    const a = Number(m.dm_user_a || 0);
+    const b = Number(m.dm_user_b || 0);
+    if (a && b) {
+      return (a === meId && b === peerId) || (a === peerId && b === meId);
+    }
+    return Number(m.dm_peer_id) === peerId && Number(m.author_id) === peerId;
   }
   return false;
+}
+
+function normalizeHex(v, fallback = '#FFFFFF') {
+  const s = String(v || '').trim();
+  return /^#[0-9A-F]{6}$/i.test(s) ? s.toUpperCase() : fallback;
+}
+
+function closeSidebarIfMobileOutsideClick(e) {
+  if (!document.body.classList.contains('showSidebar')) return;
+  if (window.innerWidth > 960) return;
+  const inSidebar = $('appView').contains(e.target) && $('appView').querySelector('.sidebar')?.contains(e.target);
+  const drawerClicked = $('drawerBtn').contains(e.target);
+  if (!inSidebar && !drawerClicked) document.body.classList.remove('showSidebar');
 }
 
 async function loadMessages(){
@@ -491,6 +514,10 @@ function renderNavLists(){
 async function afterAuth(){
   state.me = await api('/api/me');
   text($('meLabel'), `@${state.me.username}`);
+  $('accountDisplayName').value = state.me.display_name || '';
+  const color = normalizeHex(state.me.display_color, '#FFFFFF');
+  $('accountDisplayColor').value = color;
+  $('accountDisplayColorHex').value = color;
   state.channels = await api('/api/channels');
   state.users = await api('/api/dms');
 
@@ -583,7 +610,37 @@ async function boot(){
 
   $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
   $('settingsBtn').onclick = ()=> $('settingsMenu').classList.toggle('hidden');
-  document.addEventListener('click', (e)=>{ if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden'); });
+  document.addEventListener('click', (e)=>{
+    if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
+    closeSidebarIfMobileOutsideClick(e);
+  });
+
+  $('accountDisplayColor').addEventListener('input', ()=> {
+    $('accountDisplayColorHex').value = normalizeHex($('accountDisplayColor').value);
+  });
+  $('accountDisplayColorHex').addEventListener('input', ()=> {
+    const v = normalizeHex($('accountDisplayColorHex').value, $('accountDisplayColor').value || '#FFFFFF');
+    $('accountDisplayColor').value = v;
+  });
+
+  $('saveAccountBtn').onclick = async()=>{
+    try {
+      const updated = await api('/api/me/profile', 'PATCH', {
+        displayName: $('accountDisplayName').value.trim(),
+        displayColor: normalizeHex($('accountDisplayColorHex').value, $('accountDisplayColor').value)
+      });
+      state.me = updated;
+      text($('meLabel'), `@${state.me.username}`);
+      $('accountDisplayName').value = updated.display_name || '';
+      const color = normalizeHex(updated.display_color || '#FFFFFF');
+      $('accountDisplayColor').value = color;
+      $('accountDisplayColorHex').value = color;
+      await loadMessages();
+      setNotice('Account settings updated.', 'ok');
+    } catch (err) {
+      alert(`Account update failed: ${humanError(err)}`);
+    }
+  };
 
   $('themeBtn').onclick = ()=>{
     const next = document.body.classList.contains('discord') ? 'oled' : 'discord';

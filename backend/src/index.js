@@ -104,7 +104,7 @@ function auth(req, res, next) {
 }
 
 async function enforceSessionVersion(req, res, next) {
-  const { rows } = await pool.query('SELECT id, session_version, disabled, username FROM users WHERE id = $1', [req.user.sub]);
+  const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color FROM users WHERE id = $1', [req.user.sub]);
   const user = rows[0];
   if (!user || user.disabled || user.session_version !== req.user.sv) return res.status(401).json({ error: 'session_expired' });
   req.userDb = user;
@@ -171,7 +171,20 @@ app.post('/api/logout', async (req, res) => {
 });
 
 app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT id, username, display_name FROM users WHERE id=$1', [req.user.sub]);
+  const { rows } = await pool.query('SELECT id, username, display_name, display_color FROM users WHERE id=$1', [req.user.sub]);
+  res.json(rows[0]);
+});
+
+app.patch('/api/me/profile', auth, enforceSessionVersion, async (req, res) => {
+  const displayName = String(req.body.displayName || '').trim();
+  const displayColorRaw = String(req.body.displayColor || '').trim();
+  if (!displayName) return res.status(400).json({ error: 'display_name_required' });
+  const displayColor = displayColorRaw ? displayColorRaw.toUpperCase() : null;
+  if (displayColor && !/^#[0-9A-F]{6}$/i.test(displayColor)) return res.status(400).json({ error: 'invalid_color' });
+  const { rows } = await pool.query(
+    'UPDATE users SET display_name = $1, display_color = $2 WHERE id = $3 RETURNING id, username, display_name, display_color',
+    [displayName, displayColor, req.user.sub]
+  );
   res.json(rows[0]);
 });
 
@@ -358,7 +371,14 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   const text = String(body || '').slice(0, 10000);
   const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING id, author_id, channel_id, dm_peer_id, body, created_at', [req.user.sub, channelId, dmPeerId, text]);
   const msg = result.rows[0];
-  const enriched = { ...msg, username: req.userDb.username, display_name: req.userDb.display_name };
+  const enriched = {
+    ...msg,
+    username: req.userDb.username,
+    display_name: req.userDb.display_name,
+    display_color: req.userDb.display_color,
+    dm_user_a: msg.dm_peer_id ? Number(req.user.sub) : null,
+    dm_user_b: msg.dm_peer_id ? Number(msg.dm_peer_id) : null
+  };
   const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
   res.json(enriched);
@@ -381,12 +401,14 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
 
   let rows;
   if (channelId) {
-    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
+    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name, u.display_color FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
   } else if (dmPeerId) {
     ({ rows } = await pool.query(`
       SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id,
              CASE WHEN m.author_id = $2 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
-             u.username, u.display_name
+             u.username, u.display_name, u.display_color,
+             LEAST(m.author_id, m.dm_peer_id) AS dm_user_a,
+             GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b
       FROM messages m
       JOIN users u ON u.id = m.author_id
       WHERE m.id > $1
@@ -395,7 +417,7 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
       LIMIT 500
     `, [since, req.user.sub, dmPeerId]));
   } else {
-    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name, u.display_color FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
   }
   res.json(rows);
 });

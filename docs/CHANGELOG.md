@@ -4,6 +4,15 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.14] - 2026-02-16
+### Fixed
+- DM realtime filtering now enforces true two-party DM visibility using explicit participant IDs, preventing non-participant users from seeing another pair's DM messages.
+- Mobile/sidebar behavior improved: on narrow layouts, clicking outside the opened sidebar now closes it immediately.
+
+### Added
+- User account settings in the main settings menu now support self-service display-name updates.
+- User account settings now include display-color selection (color picker + hex input) and message author labels render with the chosen color.
+
 ## [0.3.13] - 2026-02-16
 ### Added
 - Added admin user-deletion flow in Admin Settings with strong verification: exact case-sensitive username re-entry plus explicit confirmation checkbox before delete is allowed.

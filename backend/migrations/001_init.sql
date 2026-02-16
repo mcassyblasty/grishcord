@@ -11,11 +11,14 @@ CREATE TABLE IF NOT EXISTS users (
   id bigserial PRIMARY KEY,
   username text UNIQUE NOT NULL,
   display_name text NOT NULL,
+  display_color text,
   password_hash text NOT NULL,
   session_version integer NOT NULL DEFAULT 1,
   disabled boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_color text;
 
 CREATE TABLE IF NOT EXISTS invites (
   id bigserial PRIMARY KEY,
