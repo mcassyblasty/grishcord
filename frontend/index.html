@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grishcord</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #000; --text:#fff; --panel:#111; }
+    body.discord { --bg:#313338; --text:#f2f3f5; --panel:#2b2d31; }
+    body { margin:0; font-family:Inter,sans-serif; background:var(--bg); color:var(--text); }
+    .app { display:grid; grid-template-columns:260px 1fr; height:100vh; }
+    .sidebar { background:var(--panel); padding:1rem; }
+    .main { display:flex; flex-direction:column; }
+    .msgs { flex:1; overflow:auto; padding:1rem; }
+    .input { padding:1rem; border-top:1px solid #444; }
+    .top { display:flex; gap:.5rem; }
+    @media (max-width: 768px){
+      .app{ grid-template-columns:1fr; }
+      .sidebar{ display:none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top" style="padding:0.5rem">
+    <button onclick="document.body.classList.toggle('discord')">Toggle Theme</button>
+    <strong>One server: Grishcord</strong>
+  </div>
+  <div class="app">
+    <aside class="sidebar">Channels<br># general<br># random<br>Voice: lobby-a, lobby-b</aside>
+    <main class="main">
+      <div class="msgs">Minimal responsive layout scaffold.</div>
+      <div class="input"><input style="width:100%" placeholder="Message (plain text only)" /></div>
+    </main>
+  </div>
+</body>
+</html>
