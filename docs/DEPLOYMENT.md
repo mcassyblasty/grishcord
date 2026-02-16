@@ -39,6 +39,7 @@ A retention sweeper runs automatically (default every 2 minutes). If `/mnt/grish
 
 
 ## Version tracking
-- Canonical version: `VERSION`
+- Canonical version: `VERSION` (single source of truth)
 - Release history: `docs/CHANGELOG.md`
-- Runtime version check (after startup): `curl -s http://<vm-ip>:<port>/api/version`
+- `APP_VERSION` is optional override; if omitted, backend reads `/app/VERSION` automatically.
+- Runtime version check (after startup): `curl -s http://localhost:<port>/api/version`

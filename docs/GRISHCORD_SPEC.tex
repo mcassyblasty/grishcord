@@ -31,7 +31,7 @@ Registration requires invite token + username + password + display name. Invite 
 Admin generates user-specific, single-use, expiring (default 1 hour) recovery links. Database stores only hash of recovery token. On first valid redemption/click, server immediately increments user session version, invalidating all existing sessions before password reset completion.
 
 \section{Channels, DMs, and Messages}
-One server only. Admin can create, rename, reorder, and archive both text and voice channels through the Admin Settings channel editor. DMs are open to all users and exposed via a dedicated DMs navigation entry; the DM list is ordered by most recent conversation activity (newest to oldest) and refreshed in near-realtime for fast peer appearance. Realtime DM rendering is strictly participant-scoped so only the two DM participants see DM traffic. Messages are plain text only; no markdown or HTML rendering. Multiline message content is preserved end-to-end (including explicit newlines entered with Shift+Enter). Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
+One server only. Admin can create, rename, reorder, archive, and hide/unhide both text and voice channels through the Admin Settings channel editor (visibility changes apply immediately). DMs are open to all users and exposed via a dedicated DMs navigation entry; the DM list is ordered by most recent conversation activity (newest to oldest) and refreshed in near-realtime for fast peer appearance. Realtime DM rendering is strictly participant-scoped so only the two DM participants see DM traffic; client matching uses explicit two-party DM participant metadata. Messages are plain text only; no markdown or HTML rendering. Multiline message content is preserved end-to-end (including explicit newlines entered with Shift+Enter). Messages support lightweight Discord-like reply context; users can edit/delete their own messages, and admins can moderate deletes in Admin Mode. Image attachments are supported via paste or file picker with normalized in-chat preview sizing and full-resolution lightbox view on click. Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
 
 \section{Images}
 Only png, jpg/jpeg, gif, and webp uploads are allowed; SVG is rejected. Server validates image signatures via magic bytes. No resizing/transcoding is performed. Images are stored under \texttt{/mnt/grishcord/uploads} with UUID-based names and require authentication to fetch. Max image size default: 15MB.
@@ -69,10 +69,10 @@ The repository contains a canonical \texttt{VERSION} file and a human-readable r
 
 \subsection{Embedded Release Changelog (Living Summary)}
 \begin{itemize}
+  \item \textbf{0.3.16}: Added clipboard/file image attachments + lightbox, fixed compose version warnings/runtime version source handling, and improved mobile/voice robustness.
+  \item \textbf{0.3.15}: Added reply/edit/delete message actions, channel hide/unhide controls, robust mobile sidebar/composer behavior, and safer DM participant scoping.
   \item \textbf{0.3.14}: Fixed strict DM participant visibility, added account display name/color editing, and improved mobile outside-click sidebar close behavior.
-  \item \textbf{0.3.13}: Added verified user-deletion flow in Admin Settings (exact username re-entry + confirmation checkbox), with safe server-side cleanup.
-  \item \textbf{0.3.12}: Fixed runtime version display resolution and preserved Shift+Enter multiline message newlines in the timeline.
-  \item \textbf{0.3.11--0.3.1}: Admin/sidebar/auth UX iterations, CSP-safe frontend script loading, and HTTP session-cookie reliability fixes.
+  \item \textbf{0.3.13--0.3.1}: Admin/sidebar/auth UX iterations, CSP-safe frontend script loading, and HTTP session-cookie reliability fixes.
 \end{itemize}
 
 \section{Security Rules}

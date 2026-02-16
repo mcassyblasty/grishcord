@@ -8,19 +8,27 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <style>
-    :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8;--danger:#ef4444;--ok:#22c55e}
+    :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8;--danger:#ef4444;--ok:#22c55e;color-scheme:dark}
     body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2;--danger:#f87171;--ok:#4ade80}
     *{box-sizing:border-box}
     html,body{height:100%;overflow:hidden}
     body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text)}
+    *::-webkit-scrollbar{width:10px;height:10px}
+    *::-webkit-scrollbar-track{background:transparent}
+    *::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#5f6690,#3f4566);border-radius:12px;border:2px solid transparent;background-clip:padding-box}
+    *::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#7a82bb,#4f5680)}
+    *{scrollbar-width:thin;scrollbar-color:#50567e transparent}
     button,input,select,textarea{font:inherit}
     button{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:.58rem .8rem;background:#0002;color:var(--text)}
     button:hover{border-color:var(--accent)}
     button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-    button.ghost{background:transparent}
+    button.ghost{background:transparent;color:var(--text)}
+    button:disabled{opacity:.62;cursor:not-allowed}
     button.channel{width:100%;text-align:left;border-radius:8px;padding:.48rem .55rem;background:transparent}
     button.channel.active{border-color:var(--line);background:#ffffff14}
     input,select,textarea{padding:.6rem;border:1px solid var(--line);border-radius:10px;background:#0002;color:var(--text)}
+    select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:2rem}
+    select option{background:var(--panel);color:var(--text)}
     .hidden{display:none!important}
     .small{font-size:.85rem;color:var(--muted)}
     .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -39,7 +47,7 @@
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
 
-    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 52px)}
+    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
     .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line)}
     .chat{display:flex;flex-direction:column;min-height:0}
     .chatHeader{padding:.7rem 1rem;border-bottom:1px solid var(--line)}
@@ -47,8 +55,15 @@
     .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px}
     .meta{font-size:.8rem;color:var(--muted)}
     .empty{padding:1rem;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
-    .composer{padding:.75rem;border-top:1px solid var(--line);display:flex;gap:.5rem}
+    .composer{padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:flex-end}
     .composer textarea{flex:1;min-height:44px;max-height:220px;resize:vertical}
+    .replyPreview{margin:.35rem .75rem 0;padding:.45rem .55rem;border:1px dashed var(--line);border-radius:8px;font-size:.85rem;color:var(--muted)}
+    .msgTools{display:flex;gap:.35rem;margin-top:.35rem}
+    .pendingImage{margin:.35rem .75rem 0;padding:.45rem;border:1px dashed var(--line);border-radius:8px;display:flex;gap:.5rem;align-items:center}
+    .pendingImage img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+    .msgImage{max-width:min(360px,86vw);max-height:280px;width:auto;height:auto;border-radius:10px;border:1px solid var(--line);margin-top:.35rem;cursor:pointer;object-fit:contain;background:#0004}
+    .imageLightbox{position:fixed;inset:0;background:#000c;z-index:130;display:flex;align-items:center;justify-content:center;padding:1rem}
+    .imageLightbox img{max-width:min(1200px,94vw);max-height:88vh;border-radius:12px;border:1px solid var(--line);background:#000}
     .stack{display:flex;flex-direction:column;gap:.5rem;margin:.75rem 0}
     .card{border:1px solid var(--line);border-radius:8px;padding:.6rem}
     .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
@@ -61,7 +76,10 @@
       .app{grid-template-columns:1fr}
       .sidebar{display:none}
       .drawerBtn{display:inline-block}
-      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:260px;z-index:20;height:calc(100vh - 52px)}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:52px auto 0 0;width:260px;z-index:20;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
+      .chat{height:calc(100dvh - 52px);height:calc(100vh - 52px)}
+      .msgs{padding:.65rem}
+      .composer textarea{max-height:140px}
     }
   </style>
 </head>
@@ -160,9 +178,13 @@
     <main class="chat">
       <div class="chatHeader" id="chatHeader"># general</div>
       <div class="msgs" id="msgs"></div>
-      <form id="composerForm" class="composer"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message (Enter to send, Shift+Enter for new line)"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
+      <div id="replyPreview" class="replyPreview hidden"></div>
+      <div id="pendingImage" class="pendingImage hidden"></div>
+      <form id="composerForm" class="composer"><button id="attachBtn" type="button" title="Double-click to select image">+</button><input id="attachFile" type="file" accept="image/*" class="hidden"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message (Enter to send, Shift+Enter for new line)"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
     </main>
   </div>
+
+  <div id="imageLightbox" class="imageLightbox hidden"><img id="lightboxImg" alt="Full-resolution image"></div>
 
   <div id="adminOverlay" class="overlay hidden">
     <div class="modal">
@@ -187,6 +209,7 @@
             <button id="addChannelBtn">Add</button>
           </div>
           <div id="channelAdminList" class="small"></div>
+          <div class="small" style="margin-top:.35rem">Hide/Unhide toggles are applied instantly for everyone.</div>
         </div>
         <div class="card">
           <h4>Generate Recovery Key</h4>

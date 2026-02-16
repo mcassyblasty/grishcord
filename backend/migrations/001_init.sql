@@ -58,10 +58,13 @@ CREATE TABLE IF NOT EXISTS messages (
   author_id bigint NOT NULL REFERENCES users(id),
   channel_id bigint REFERENCES channels(id),
   dm_peer_id bigint REFERENCES users(id),
+  reply_to bigint REFERENCES messages(id) ON DELETE SET NULL,
   body text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK (char_length(body) <= 10000)
 );
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to bigint REFERENCES messages(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS uploads (
   id bigserial PRIMARY KEY,

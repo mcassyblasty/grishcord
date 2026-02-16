@@ -15,3 +15,5 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 ## Versioning
 - Canonical app version: `VERSION`
 - Release history: `docs/CHANGELOG.md`
+- Runtime source of truth in containers: backend reads `/app/VERSION` by default.
+- Optional override: set `APP_VERSION` only if you intentionally want to override `VERSION`.

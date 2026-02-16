@@ -4,6 +4,37 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.17] - 2026-02-16
+### Added
+- New user registrations now receive a randomly generated display-name color automatically, so accounts start with distinct identity coloring without admin/user setup.
+
+### Changed
+- Refined shared control styling to better match the app theme, including improved dark-mode select/dropdown rendering and clearer disabled/ghost button readability.
+
+## [0.3.16] - 2026-02-16
+### Fixed
+- Eliminated Docker Compose APP_VERSION warning by removing the unset-required compose env reference and mounting `./VERSION` into backend at `/app/VERSION`.
+- Runtime version reporting is now robust: empty/unset `APP_VERSION` falls back to `VERSION` file with startup source logging (`env`, `file:*`, or fallback).
+- Voice join no longer throws on environments without `navigator.mediaDevices.getUserMedia`; it now enters a safe listen-only fallback.
+- Mobile composer visibility and sidebar-close behavior improved for narrow layouts.
+
+### Added
+- Clipboard/file image attachment workflow in composer (paste image or `+` picker) with removable pending preview before send.
+- Message image rendering with normalized in-chat sizing and full-resolution centered lightbox on click.
+- Message reply/edit/delete interactions (Discord-like flow): reply for all, edit for own, delete for own (admin moderation retained in admin mode).
+- Admin channel visibility controls (Hide/Unhide) in channel editor.
+
+## [0.3.15] - 2026-02-16
+### Fixed
+- DM rendering now applies strict conversation matching in realtime and history paths using explicit DM participant metadata, preventing cross-conversation visibility.
+- Voice join no longer crashes on browsers/origins where `getUserMedia` is unavailable; app falls back to listen-only join with a clear status note.
+- Mobile layout now keeps the composer visible more reliably in narrow viewports and closes the sidebar when selecting navigation targets or clicking outside.
+
+### Added
+- Message actions: reply (all users), edit (own messages), and delete (own messages; admin can also moderate while Admin Mode is enabled).
+- Reply threading support with quoted preview and reply target context in composer.
+- Admin channel visibility toggle (Hide/Unhide) in channel editor for instant channel visibility control.
+
 ## [0.3.14] - 2026-02-16
 ### Fixed
 - DM realtime filtering now enforces true two-party DM visibility using explicit participant IDs, preventing non-participant users from seeing another pair's DM messages.

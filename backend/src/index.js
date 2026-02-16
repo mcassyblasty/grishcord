@@ -31,20 +31,28 @@ const RETENTION_THRESHOLD = Number(process.env.RETENTION_THRESHOLD_PCT || 90);
 const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS || 120000);
 const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || '/mnt/grishcord';
 
-let APP_VERSION = process.env.APP_VERSION || '0.0.0';
-for (const p of [
-  process.env.APP_VERSION_FILE,
-  path.join(process.cwd(), '..', 'VERSION'),
-  path.join(process.cwd(), 'VERSION'),
-  '/app/VERSION'
-].filter(Boolean)) {
-  try {
-    const candidate = (await fsp.readFile(p, 'utf8')).trim();
-    if (candidate) {
-      APP_VERSION = candidate;
-      break;
-    }
-  } catch {}
+let APP_VERSION = '0.0.0';
+let APP_VERSION_SOURCE = 'fallback';
+const envVersion = String(process.env.APP_VERSION || '').trim();
+if (envVersion) {
+  APP_VERSION = envVersion;
+  APP_VERSION_SOURCE = 'env';
+} else {
+  for (const p of [
+    process.env.APP_VERSION_FILE,
+    '/app/VERSION',
+    path.join(process.cwd(), '..', 'VERSION'),
+    path.join(process.cwd(), 'VERSION')
+  ].filter(Boolean)) {
+    try {
+      const candidate = (await fsp.readFile(p, 'utf8')).trim();
+      if (candidate) {
+        APP_VERSION = candidate;
+        APP_VERSION_SOURCE = `file:${p}`;
+        break;
+      }
+    } catch {}
+  }
 }
 
 const spamPresets = {
@@ -62,6 +70,24 @@ app.use(cookieParser());
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } });
 const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
 const token = (n = 32) => crypto.randomBytes(n).toString('hex');
+
+function randomDisplayColor() {
+  const hue = Math.floor(Math.random() * 360);
+  const sat = 65 + Math.floor(Math.random() * 20);
+  const light = 58 + Math.floor(Math.random() * 12);
+  const c = (1 - Math.abs((2 * light / 100) - 1)) * (sat / 100);
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = (light / 100) - (c / 2);
+  let r = 0, g = 0, b = 0;
+  if (hue < 60) [r, g, b] = [c, x, 0];
+  else if (hue < 120) [r, g, b] = [x, c, 0];
+  else if (hue < 180) [r, g, b] = [0, c, x];
+  else if (hue < 240) [r, g, b] = [0, x, c];
+  else if (hue < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const toHex = (n) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
 
 function parseCookieHeader(raw = '') {
   const out = {};
@@ -143,7 +169,7 @@ app.post('/api/register', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM invites WHERE token_hash = $1 AND revoked_at IS NULL AND used_by IS NULL AND expires_at > now()', [h]);
   if (!rows[0]) return res.status(400).json({ error: 'invalid_invite' });
   const pw = await bcrypt.hash(password, 12);
-  const user = await pool.query('INSERT INTO users (username, display_name, password_hash) VALUES ($1,$2,$3) RETURNING id', [username, displayName, pw]);
+  const user = await pool.query('INSERT INTO users (username, display_name, display_color, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [username, displayName, randomDisplayColor(), pw]);
   await pool.query('UPDATE invites SET used_by = $1, used_at = now() WHERE id = $2', [user.rows[0].id, rows[0].id]);
   res.json({ ok: true });
 });
@@ -208,6 +234,7 @@ app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asy
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
   const name = req.body.name === undefined ? null : String(req.body.name).trim();
   const position = req.body.position === undefined ? null : Number(req.body.position);
+  const archived = req.body.archived === undefined ? null : req.body.archived === true;
   const current = await pool.query('SELECT id FROM channels WHERE id = $1', [id]);
   if (!current.rows[0]) return res.status(404).json({ error: 'not_found' });
   if (name !== null) {
@@ -217,6 +244,9 @@ app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asy
   if (position !== null) {
     if (!Number.isFinite(position) || position < 1) return res.status(400).json({ error: 'invalid_position' });
     await pool.query('UPDATE channels SET position = $1 WHERE id = $2', [Math.round(position), id]);
+  }
+  if (archived !== null) {
+    await pool.query('UPDATE channels SET archived = $1 WHERE id = $2', [archived, id]);
   }
   res.json({ ok: true });
 });
@@ -249,12 +279,14 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
 app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
   const users = await pool.query('SELECT id, username, display_name, disabled, created_at FROM users ORDER BY id ASC');
+  const channels = await pool.query('SELECT id, name, kind, position, archived FROM channels ORDER BY kind ASC, position ASC, id ASC');
   const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2)', ['anti_spam_level', 'voice_bitrate']);
   const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
   const level = Number(settingMap.anti_spam_level ?? 5);
   res.json({
     invites: invites.rows,
     users: users.rows,
+    channels: channels.rows,
     antiSpamLevel: level,
     antiSpamEffective: spamPresets[level] || spamPresets[5],
     voiceBitrate: Number(settingMap.voice_bitrate ?? 32000)
@@ -365,30 +397,77 @@ app.post('/api/recovery/reset', async (req, res) => {
 });
 
 app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
-  const { channelId = null, dmPeerId = null, body } = req.body;
+  const { channelId = null, dmPeerId = null, body, replyToId = null, uploadIds = [] } = req.body;
   if (req.userDb.disabled) return res.status(403).json({ error: 'disabled' });
   if (!channelId && !dmPeerId) return res.status(400).json({ error: 'target_required' });
   const text = String(body || '').slice(0, 10000);
-  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, body) VALUES($1,$2,$3,$4) RETURNING id, author_id, channel_id, dm_peer_id, body, created_at', [req.user.sub, channelId, dmPeerId, text]);
+  const ids = Array.isArray(uploadIds)
+    ? [...new Set(uploadIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))].slice(0, 8)
+    : [];
+  if (!text.trim() && ids.length === 0) return res.status(400).json({ error: 'empty_body' });
+  let replyMeta = null;
+  if (replyToId) {
+    const { rows } = await pool.query('SELECT id, channel_id, dm_peer_id, author_id, body FROM messages WHERE id = $1', [Number(replyToId)]);
+    const r = rows[0];
+    if (!r) return res.status(400).json({ error: 'invalid_reply_target' });
+    if (channelId && Number(r.channel_id) !== Number(channelId)) return res.status(400).json({ error: 'invalid_reply_target' });
+    if (dmPeerId) {
+      const me = Number(req.user.sub);
+      const peer = Number(dmPeerId);
+      const ok = (Number(r.author_id) === me && Number(r.dm_peer_id) === peer) || (Number(r.author_id) === peer && Number(r.dm_peer_id) === me);
+      if (!ok) return res.status(400).json({ error: 'invalid_reply_target' });
+    }
+    replyMeta = { id: r.id, body: r.body, author_id: r.author_id };
+  }
+  const result = await pool.query('INSERT INTO messages(author_id, channel_id, dm_peer_id, reply_to, body) VALUES($1,$2,$3,$4,$5) RETURNING id, author_id, channel_id, dm_peer_id, reply_to, body, created_at', [req.user.sub, channelId, dmPeerId, replyToId ? Number(replyToId) : null, text]);
   const msg = result.rows[0];
+  if (ids.length) {
+    const validUploads = await pool.query('SELECT id FROM uploads WHERE id = ANY($1::bigint[]) AND owner_id = $2', [ids, req.user.sub]);
+    for (const u of validUploads.rows) {
+      await pool.query('INSERT INTO message_uploads(message_id, upload_id) VALUES($1, $2) ON CONFLICT DO NOTHING', [msg.id, u.id]);
+    }
+  }
+  const uploads = await pool.query('SELECT u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = $1 ORDER BY u.id ASC', [msg.id]);
   const enriched = {
     ...msg,
     username: req.userDb.username,
     display_name: req.userDb.display_name,
     display_color: req.userDb.display_color,
     dm_user_a: msg.dm_peer_id ? Number(req.user.sub) : null,
-    dm_user_b: msg.dm_peer_id ? Number(msg.dm_peer_id) : null
+    dm_user_b: msg.dm_peer_id ? Number(msg.dm_peer_id) : null,
+    reply_to: msg.reply_to,
+    reply_body: replyMeta?.body || null,
+    reply_author_id: replyMeta?.author_id || null,
+    uploads: uploads.rows.map((u) => ({ id: u.id, content_type: u.content_type, url: `/api/uploads/${u.id}` }))
   };
   const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
   res.json(enriched);
 });
 
-app.delete('/api/messages/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
+  const id = Number(req.params.id);
+  const body = String(req.body.body || '').slice(0, 10000);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  if (!body.trim()) return res.status(400).json({ error: 'empty_body' });
+  const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
+  const m = q.rows[0];
+  if (!m) return res.status(404).json({ error: 'not_found' });
+  if (Number(m.author_id) !== Number(req.user.sub) && req.userDb.username !== ADMIN_USERNAME) return res.status(403).json({ error: 'forbidden' });
+  const r = await pool.query('UPDATE messages SET body = $1 WHERE id = $2 RETURNING id', [body, id]);
+  const payload = JSON.stringify({ type: 'message_edited', data: { id: r.rows[0].id, body } });
+  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+  res.json({ ok: true, id, body });
+});
+
+app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
+  const m = q.rows[0];
+  if (!m) return res.status(404).json({ error: 'not_found' });
+  if (Number(m.author_id) !== Number(req.user.sub) && req.userDb.username !== ADMIN_USERNAME) return res.status(403).json({ error: 'forbidden' });
   const r = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
-  if (!r.rowCount) return res.status(404).json({ error: 'not_found' });
   const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
   res.json({ ok: true });
@@ -401,23 +480,47 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
 
   let rows;
   if (channelId) {
-    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name, u.display_color FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 AND m.channel_id = $2 ORDER BY m.id ASC LIMIT 500', [since, channelId]));
+    ({ rows } = await pool.query(`
+      SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, m.reply_to,
+             u.username, u.display_name, u.display_color,
+             rm.body AS reply_body, rm.author_id AS reply_author_id
+      FROM messages m
+      JOIN users u ON u.id=m.author_id
+      LEFT JOIN messages rm ON rm.id = m.reply_to
+      WHERE m.id > $1 AND m.channel_id = $2
+      ORDER BY m.id ASC LIMIT 500
+    `, [since, channelId]));
   } else if (dmPeerId) {
     ({ rows } = await pool.query(`
       SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id,
              CASE WHEN m.author_id = $2 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
              u.username, u.display_name, u.display_color,
              LEAST(m.author_id, m.dm_peer_id) AS dm_user_a,
-             GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b
+             GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b,
+             m.reply_to, rm.body AS reply_body, rm.author_id AS reply_author_id
       FROM messages m
       JOIN users u ON u.id = m.author_id
+      LEFT JOIN messages rm ON rm.id = m.reply_to
       WHERE m.id > $1
         AND ((m.author_id = $2 AND m.dm_peer_id = $3) OR (m.author_id = $3 AND m.dm_peer_id = $2))
       ORDER BY m.id ASC
       LIMIT 500
     `, [since, req.user.sub, dmPeerId]));
   } else {
-    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, u.username, u.display_name, u.display_color FROM messages m JOIN users u ON u.id=m.author_id WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.channel_id, m.dm_peer_id, m.reply_to, u.username, u.display_name, u.display_color, rm.body AS reply_body, rm.author_id AS reply_author_id FROM messages m JOIN users u ON u.id=m.author_id LEFT JOIN messages rm ON rm.id=m.reply_to WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+  }
+  const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
+  const byId = new Map();
+  if (messageIds.length) {
+    const upl = await pool.query('SELECT mu.message_id, u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = ANY($1::bigint[]) ORDER BY u.id ASC', [messageIds]);
+    for (const r of upl.rows) {
+      const arr = byId.get(Number(r.message_id)) || [];
+      arr.push({ id: r.id, content_type: r.content_type, url: `/api/uploads/${r.id}` });
+      byId.set(Number(r.message_id), arr);
+    }
+  }
+  for (const r of rows) {
+    r.uploads = byId.get(Number(r.id)) || [];
   }
   res.json(rows);
 });
@@ -542,4 +645,4 @@ await runMigrations();
 setInterval(retentionSweep, RETENTION_INTERVAL_MS);
 
 const port = Number(process.env.PORT || 3000);
-server.listen(port, () => console.log(`api on ${port}`));
+server.listen(port, () => console.log(`api on ${port} (version ${APP_VERSION} via ${APP_VERSION_SOURCE})`));

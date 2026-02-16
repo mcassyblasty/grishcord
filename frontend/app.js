@@ -16,7 +16,11 @@ const state = {
     peers: new Map(),
     muted: false
   },
-  adminMode: false
+  adminMode: false,
+  replyTo: null,
+  allChannels: [],
+  pendingImageFile: null,
+  pendingImagePreviewUrl: ''
 };
 
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
@@ -43,7 +47,75 @@ function humanError(err){
   if (msg === 'cannot_delete_admin') return 'The admin user cannot be deleted.';
   if (msg === 'display_name_required') return 'Display name is required.';
   if (msg === 'invalid_color') return 'Display color must be a hex color like #AABBCC.';
+  if (msg === 'invalid_reply_target') return 'Cannot reply to a message outside the current conversation.';
+  if (msg === 'empty_body') return 'Message cannot be empty.';
+  if (msg === 'forbidden') return 'You do not have permission for that action.';
   return msg;
+}
+
+function messageAuthorLabel(m) {
+  return m.display_name || m.username || 'user';
+}
+
+function setReplyTarget(m) {
+  state.replyTo = m ? { id: m.id, body: m.body || '', author: messageAuthorLabel(m) } : null;
+  const box = $('replyPreview');
+  if (!state.replyTo) {
+    box.classList.add('hidden');
+    box.textContent = '';
+    return;
+  }
+  box.classList.remove('hidden');
+  box.textContent = `Replying to ${state.replyTo.author}: ${(state.replyTo.body || '').slice(0, 140)}`;
+  const cancel = document.createElement('button');
+  cancel.textContent = '×';
+  cancel.style.marginLeft = '.5rem';
+  cancel.onclick = () => setReplyTarget(null);
+  box.appendChild(cancel);
+}
+
+function clearPendingImage() {
+  state.pendingImageFile = null;
+  if (state.pendingImagePreviewUrl) {
+    URL.revokeObjectURL(state.pendingImagePreviewUrl);
+    state.pendingImagePreviewUrl = '';
+  }
+  const box = $('pendingImage');
+  box.classList.add('hidden');
+  box.textContent = '';
+  $('attachFile').value = '';
+}
+
+function setPendingImage(file) {
+  if (!file) return clearPendingImage();
+  clearPendingImage();
+  state.pendingImageFile = file;
+  state.pendingImagePreviewUrl = URL.createObjectURL(file);
+  const box = $('pendingImage');
+  box.classList.remove('hidden');
+  const img = document.createElement('img');
+  img.src = state.pendingImagePreviewUrl;
+  img.alt = 'Pending image';
+  const meta = document.createElement('div');
+  meta.className = 'small';
+  meta.textContent = `${file.name || 'clipboard-image'} (${Math.round(file.size / 1024)} KB)`;
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.textContent = 'Remove';
+  remove.onclick = clearPendingImage;
+  box.append(img, meta, remove);
+}
+
+function openLightbox(url) {
+  const wrap = $('imageLightbox');
+  $('lightboxImg').src = url;
+  wrap.classList.remove('hidden');
+}
+
+function closeLightbox() {
+  const wrap = $('imageLightbox');
+  wrap.classList.add('hidden');
+  $('lightboxImg').src = '';
 }
 
 async function api(path, method='GET', body){
@@ -65,6 +137,15 @@ function renderMessage(m){
   body.style.wordBreak = 'break-word';
   const full = m.body || '';
   const short = full.length > 2000 ? full.slice(0,2000) : full;
+  if (m.reply_to) {
+    const reply = document.createElement('div');
+    reply.className = 'small';
+    reply.style.borderLeft = '2px solid var(--line)';
+    reply.style.paddingLeft = '.45rem';
+    reply.style.marginBottom = '.25rem';
+    reply.textContent = `↪ ${(m.reply_body || '').slice(0,120)}`;
+    wrap.appendChild(reply);
+  }
   body.textContent = short;
   wrap.append(meta, body);
   if (full.length > 2000){
@@ -72,10 +153,57 @@ function renderMessage(m){
     b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
     wrap.appendChild(b);
   }
-  if (state.me?.username === 'mcassyblasty' && state.adminMode) {
+  if (Array.isArray(m.uploads) && m.uploads.length) {
+    const imgWrap = document.createElement('div');
+    for (const up of m.uploads) {
+      const ct = String(up.content_type || '');
+      if (!ct.startsWith('image/')) continue;
+      const img = document.createElement('img');
+      img.className = 'msgImage';
+      img.src = up.url;
+      img.alt = 'Uploaded image';
+      img.loading = 'lazy';
+      img.onclick = () => openLightbox(up.url);
+      imgWrap.appendChild(img);
+    }
+    if (imgWrap.children.length) wrap.appendChild(imgWrap);
+  }
+  const tools = document.createElement('div');
+  tools.className = 'msgTools';
+
+  const replyBtn = document.createElement('button');
+  replyBtn.className = 'ghost';
+  replyBtn.title = 'Reply';
+  replyBtn.textContent = '↩';
+  replyBtn.onclick = ()=> setReplyTarget(m);
+  tools.appendChild(replyBtn);
+
+  const canModerate = state.me?.username === 'mcassyblasty' && state.adminMode;
+  const own = Number(m.author_id) === Number(state.me?.id);
+
+  if (own) {
+    const edit = document.createElement('button');
+    edit.className = 'ghost';
+    edit.title = 'Edit message';
+    edit.textContent = '✏️';
+    edit.onclick = async()=>{
+      const next = prompt('Edit message', m.body || '');
+      if (next === null) return;
+      try {
+        const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next });
+        body.textContent = r.body || next;
+      } catch (err) {
+        alert(`Edit failed: ${humanError(err)}`);
+      }
+    };
+    tools.appendChild(edit);
+  }
+
+  if (own || canModerate) {
     const del = document.createElement('button');
     del.className = 'ghost';
-    del.textContent = 'Delete';
+    del.title = 'Delete message';
+    del.textContent = '🗑️';
     del.onclick = async () => {
       if (!confirm('Delete this message?')) return;
       try {
@@ -85,8 +213,10 @@ function renderMessage(m){
         alert(`Delete failed: ${humanError(err)}`);
       }
     };
-    wrap.appendChild(del);
+    tools.appendChild(del);
   }
+
+  if (tools.children.length) wrap.appendChild(tools);
   $('msgs').appendChild(wrap);
 }
 
@@ -116,6 +246,20 @@ function closeSidebarIfMobileOutsideClick(e) {
   const inSidebar = $('appView').contains(e.target) && $('appView').querySelector('.sidebar')?.contains(e.target);
   const drawerClicked = $('drawerBtn').contains(e.target);
   if (!inSidebar && !drawerClicked) document.body.classList.remove('showSidebar');
+}
+
+function closeSidebarOnMobile() {
+  if (window.innerWidth <= 960) document.body.classList.remove('showSidebar');
+}
+
+async function uploadImageFile(file) {
+  const fd = new FormData();
+  fd.append('image', file);
+  const res = await fetch('/api/upload-image', { method: 'POST', credentials: 'include', body: fd });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
 }
 
 async function loadMessages(){
@@ -153,6 +297,14 @@ function connectWs(){
     if (msg.type === 'message_deleted' && msg.data?.id) {
       const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
       if (n) n.remove();
+    }
+    if (msg.type === 'message_edited' && msg.data?.id) {
+      const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
+      if (n) {
+        const bodies = [...n.children].filter((el) => el.tagName === 'DIV' && !el.classList.contains('meta') && !el.classList.contains('small') && !el.classList.contains('msgTools'));
+        const body = bodies[bodies.length - 1];
+        if (body) body.textContent = msg.data.body || '';
+      }
     }
     if (msg.type === 'message' && msg.data?.dm_peer_id) {
       refreshDms().catch(() => {});
@@ -202,6 +354,7 @@ async function refreshAdmin(){
   $('openAdminBtn').classList.remove('hidden');
   $('adminModeToggle').checked = state.adminMode;
   const s = await api('/api/admin/state');
+  state.allChannels = s.channels || [];
   $('spamLevel').value = String(s.antiSpamLevel);
   $('voiceBitrate').value = String(s.voiceBitrate);
   setSpamEffective(Number(s.antiSpamLevel));
@@ -388,7 +541,12 @@ async function joinVoiceRoom(room) {
   await leaveVoiceRoom();
   showVoicePlaceholder(room);
   try {
-    state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (navigator.mediaDevices?.getUserMedia) {
+      state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } else {
+      state.voice.stream = new MediaStream();
+      updateVoiceStatus('Joined in listen-only mode (mic unavailable on this browser/origin).');
+    }
     state.voice.room = room;
     state.ws?.send(JSON.stringify({ type: 'voice_join', room }));
     const btnRow = document.createElement('div');
@@ -471,6 +629,7 @@ function renderNavLists(){
     b.textContent = `# ${c.name}`;
     b.onclick = async()=>{
       state.mode='channel';
+      setReplyTarget(null);
       switchSidebarView('server');
       state.activeChannelId = c.id;
       state.activeDmPeerId = null;
@@ -478,6 +637,7 @@ function renderNavLists(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      closeSidebarOnMobile();
     };
     cl.appendChild(b);
   }
@@ -499,6 +659,7 @@ function renderNavLists(){
     b.style.opacity='0.96';
     b.onclick = async()=>{
       state.mode='dm';
+      setReplyTarget(null);
       switchSidebarView('dms');
       state.activeDmPeerId = u.id;
       state.activeChannelId = null;
@@ -506,6 +667,7 @@ function renderNavLists(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      closeSidebarOnMobile();
     };
     dl.appendChild(b);
   }
@@ -552,13 +714,14 @@ async function refreshChannels(){
     state.activeChannelId = state.channels.find((c)=>c.kind !== 'voice')?.id || null;
   }
   renderNavLists();
+  if (state.me?.username === 'mcassyblasty') refreshAdmin().catch(() => {});
 }
 
 function renderChannelAdmin(){
   const list = $('channelAdminList');
   if (!list) return;
   list.textContent = '';
-  for (const c of state.channels) {
+  for (const c of (state.allChannels.length ? state.allChannels : state.channels)) {
     const row = document.createElement('div');
     row.className = 'row';
     const nameInput = document.createElement('input');
@@ -591,11 +754,20 @@ function renderChannelAdmin(){
       if (!confirm(`Archive ${c.kind} channel ${c.name}?`)) return;
       await api(`/api/admin/channels/${c.id}`, 'DELETE');
       await refreshChannels();
+      await refreshAdmin();
+      renderChannelAdmin();
+    };
+    const hide = document.createElement('button');
+    hide.textContent = c.archived ? 'Unhide' : 'Hide';
+    hide.onclick = async()=>{
+      await api(`/api/admin/channels/${c.id}`, 'PATCH', { archived: !c.archived });
+      await refreshChannels();
+      await refreshAdmin();
       renderChannelAdmin();
     };
     const label = document.createElement('span');
     label.textContent = `[${c.kind}] #${c.id}`;
-    row.append(label, nameInput, save, up, down, del);
+    row.append(label, nameInput, save, up, down, hide, del);
     list.appendChild(row);
   }
 }
@@ -642,6 +814,33 @@ async function boot(){
     }
   };
 
+  $('attachBtn').ondblclick = ()=> $('attachFile').click();
+  $('attachBtn').onclick = ()=> $('attachFile').click();
+  $('attachFile').onchange = ()=> {
+    const file = $('attachFile').files?.[0];
+    if (!file) return;
+    if (!String(file.type || '').startsWith('image/')) {
+      alert('Please choose an image file.');
+      return;
+    }
+    setPendingImage(file);
+  };
+  $('msgInput').addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const it of items) {
+      if (it.type && it.type.startsWith('image/')) {
+        const f = it.getAsFile();
+        if (f) {
+          setPendingImage(f);
+          e.preventDefault();
+          break;
+        }
+      }
+    }
+  });
+
+  $('imageLightbox').onclick = (e)=> { if (e.target === $('imageLightbox')) closeLightbox(); };
+
   $('themeBtn').onclick = ()=>{
     const next = document.body.classList.contains('discord') ? 'oled' : 'discord';
     localStorage.setItem('grishcord_theme', next);
@@ -656,6 +855,7 @@ async function boot(){
     try { await api('/api/logout','POST',{}); } catch {}
     await leaveVoiceRoom();
     state.me = null;
+    setReplyTarget(null);
     state.adminMode = false;
     text($('meLabel'), 'Not logged in');
     $('adminOverlay').classList.add('hidden');
@@ -664,6 +864,7 @@ async function boot(){
 
   $('serverViewBtn').onclick = async()=>{
     switchSidebarView('server');
+    setReplyTarget(null);
     if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
     state.mode = 'channel';
     const active = state.channels.find((c) => c.id === state.activeChannelId && c.kind !== 'voice') || state.channels.find((c) => c.kind !== 'voice');
@@ -673,11 +874,13 @@ async function boot(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      closeSidebarOnMobile();
     }
   };
 
   $('dmViewBtn').onclick = async()=>{
     switchSidebarView('dms');
+    setReplyTarget(null);
     state.mode = 'dm';
     if (!state.activeDmPeerId && state.users.length) state.activeDmPeerId = state.users[0].id;
     const active = state.users.find((u) => u.id === state.activeDmPeerId) || state.users[0];
@@ -687,6 +890,7 @@ async function boot(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      closeSidebarOnMobile();
     }
   };
 
@@ -759,10 +963,18 @@ async function boot(){
   $('composerForm').onsubmit = async(e)=>{
     e.preventDefault();
     const rawBody = $('msgInput').value;
-    if(!rawBody.trim()) return;
+    if(!rawBody.trim() && !state.pendingImageFile) return;
     try {
-      await api('/api/messages','POST',{body: rawBody,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});
+      const replyToId = state.replyTo?.id || null;
+      const uploadIds = [];
+      if (state.pendingImageFile) {
+        const up = await uploadImageFile(state.pendingImageFile);
+        if (up.uploadId) uploadIds.push(up.uploadId);
+      }
+      await api('/api/messages','POST',{body: rawBody,replyToId,uploadIds,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});
       $('msgInput').value='';
+      setReplyTarget(null);
+      clearPendingImage();
       if (state.mode === 'dm') await refreshDms();
     } catch(err){
       alert(`Send failed: ${humanError(err)}`);
