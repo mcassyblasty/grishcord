@@ -1,0 +1,77 @@
+name: grishcord
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /mnt/grishcord/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      JWT_SECRET: ${JWT_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      HOST_DATA_ROOT: /mnt/grishcord
+      UPLOADS_DIR: /mnt/grishcord/uploads
+      RETENTION_THRESHOLD_PCT: ${RETENTION_THRESHOLD_PCT}
+      RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS}
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES}
+    volumes:
+      - /mnt/grishcord/uploads:/mnt/grishcord/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+
+  caddy:
+    image: caddy:2.8
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      - "7881:7881/tcp"
+      - "50000-50999:50000-50999/udp"
+    volumes:
+      - /mnt/grishcord/config/livekit.yaml:/etc/livekit.yaml:ro
+
+  coturn:
+    image: coturn/coturn:4.6
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "51000-51999:51000-51999/udp"
+    volumes:
+      - /mnt/grishcord/config/turnserver.conf:/etc/coturn/turnserver.conf:ro

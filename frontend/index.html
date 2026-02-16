@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grishcord</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8}
+    body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text)}
+    button,input,select{font:inherit} button{cursor:pointer}
+    .hidden{display:none!important}
+    .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center}
+    .app{display:grid;grid-template-columns:250px 1fr 360px;height:calc(100vh - 48px)}
+    .sidebar,.admin{background:var(--panel);padding:1rem;overflow:auto}
+    .chat{display:flex;flex-direction:column;min-height:0}
+    .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+    .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px}
+    .meta{font-size:.8rem;color:var(--muted)}
+    .composer{padding:.75rem;border-top:1px solid var(--line);display:flex;gap:.5rem}
+    .composer input{flex:1;padding:.5rem;background:#0002;color:var(--text);border:1px solid var(--line);border-radius:8px}
+    .stack{display:flex;flex-direction:column;gap:.5rem;margin:.75rem 0}
+    .card{border:1px solid var(--line);border-radius:8px;padding:.6rem}
+    .small{font-size:.85rem;color:var(--muted)}
+    .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
+    .drawerBtn{display:none}
+    @media (max-width:960px){
+      .app{grid-template-columns:1fr}
+      .sidebar{display:none}
+      .admin{max-height:40vh}
+      .drawerBtn{display:inline-block}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:48px auto 0 0;width:250px;z-index:20;height:calc(100vh - 48px)}
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <button class="drawerBtn" onclick="document.body.classList.toggle('showSidebar')">☰</button>
+    <button id="themeBtn">Toggle Theme</button>
+    <strong>Grishcord</strong>
+    <span class="small" id="meLabel">Not logged in</span>
+    <button id="logoutBtn" class="hidden">Logout</button>
+  </div>
+
+  <div id="authView" style="padding:1rem;max-width:700px">
+    <h2>Login</h2>
+    <div class="row"><input id="loginUser" placeholder="username"><input id="loginPass" type="password" placeholder="password"><button id="loginBtn">Login</button></div>
+    <h3>Register (Invite Required)</h3>
+    <div class="row"><input id="regInvite" placeholder="invite token"><input id="regUser" placeholder="username"><input id="regDisplay" placeholder="display name"><input id="regPass" type="password" placeholder="password"><button id="regBtn">Register</button></div>
+    <h3>Recovery</h3>
+    <div class="row"><input id="recoverToken" placeholder="recovery token"><button id="redeemBtn">Redeem Token</button><input id="newPass" type="password" placeholder="new password"><button id="resetBtn">Reset Password</button></div>
+    <div id="authMsg" class="small"></div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <h3>Channels</h3>
+      <div># general</div>
+      <div># random</div>
+      <h4>Voice</h4>
+      <div>lobby-a</div><div>lobby-b</div>
+    </aside>
+
+    <main class="chat">
+      <div class="msgs" id="msgs"></div>
+      <div class="composer"><input id="msgInput" maxlength="10000" placeholder="Plain-text message"><button id="sendBtn">Send</button></div>
+    </main>
+
+    <aside class="admin" id="adminPanel">
+      <h3>Admin Panel</h3>
+      <div class="small">Invite generation, recovery generation, anti-spam setting, bitrate, and account freeze.</div>
+
+      <div class="stack">
+        <div class="card">
+          <h4>Create Invite</h4>
+          <div class="row"><input id="ttlDays" type="number" value="7" min="1" max="30"><button id="createInviteBtn">Generate</button></div>
+          <div id="inviteOut" class="linkbox small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Generate Recovery Link</h4>
+          <div class="row"><input id="recoveryUser" placeholder="username"><button id="genRecoveryBtn">Generate</button></div>
+          <div id="recoveryOut" class="linkbox small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Anti-Spam + Voice Bitrate</h4>
+          <div class="row"><label>Level</label><select id="spamLevel"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
+          <div class="small" id="spamEffective"></div>
+          <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
+          <button id="saveSettingsBtn">Save Settings</button>
+        </div>
+
+        <div class="card">
+          <h4>Invites</h4>
+          <div id="inviteList" class="small"></div>
+        </div>
+
+        <div class="card">
+          <h4>Users</h4>
+          <div id="userList" class="small"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { me:null, lastId:0, redeemId:null, ws:null };
+const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
+
+function text(el, v){ el.textContent = v; }
+function showAuth(msg=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); text($('authMsg'), msg); }
+function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('logoutBtn').classList.remove('hidden'); }
+function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
+
+async function api(path, method='GET', body){
+  const res = await fetch(path,{method,credentials:'include',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function renderMessage(m){
+  const wrap = document.createElement('div'); wrap.className='msg';
+  const meta = document.createElement('div'); meta.className='meta';
+  meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
+  const body = document.createElement('div');
+  const full = m.body || '';
+  const short = full.length > 2000 ? full.slice(0,2000) : full;
+  body.textContent = short;
+  wrap.append(meta, body);
+  if (full.length > 2000){
+    const b = document.createElement('button'); b.textContent='Read more';
+    b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
+    wrap.appendChild(b);
+  }
+  $('msgs').appendChild(wrap);
+  $('msgs').scrollTop = $('msgs').scrollHeight;
+}
+
+async function loadMessages(){
+  const rows = await api(`/api/messages/since/${state.lastId}`);
+  for (const m of rows){ renderMessage(m); state.lastId = Math.max(state.lastId, Number(m.id||0)); }
+}
+
+function connectWs(){
+  if(state.ws) state.ws.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  state.ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.ws.onmessage = (e) => {
+    let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    if(msg.type === 'message' && msg.data && Number(msg.data.id) > state.lastId){
+      renderMessage(msg.data); state.lastId = Number(msg.data.id);
+    }
+  };
+  state.ws.onclose = () => setTimeout(connectWs, 2000);
+}
+
+function setSpamEffective(level){
+  const p = spamMap[level] || spamMap[5];
+  text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
+}
+
+async function refreshAdmin(){
+  if (!state.me || state.me.username !== 'mcassyblasty') { $('adminPanel').classList.add('hidden'); return; }
+  $('adminPanel').classList.remove('hidden');
+  const s = await api('/api/admin/state');
+  $('spamLevel').value = String(s.antiSpamLevel);
+  $('voiceBitrate').value = String(s.voiceBitrate);
+  setSpamEffective(Number(s.antiSpamLevel));
+
+  const inviteList = $('inviteList'); inviteList.innerHTML='';
+  for(const i of s.invites){
+    const row = document.createElement('div'); row.className='row';
+    const label = document.createElement('span');
+    label.textContent = `#${i.id} exp:${fmtTs(i.expires_at)} used:${i.used_at ? 'yes' : 'no'} revoked:${i.revoked_at ? 'yes' : 'no'}`;
+    row.appendChild(label);
+    if(!i.used_at && !i.revoked_at){
+      const btn = document.createElement('button'); btn.textContent='Revoke';
+      btn.onclick = async()=>{ await api(`/api/admin/invites/${i.id}/revoke`,'POST',{}); await refreshAdmin(); };
+      row.appendChild(btn);
+    }
+    inviteList.appendChild(row);
+  }
+
+  const userList = $('userList'); userList.innerHTML='';
+  for(const u of s.users){
+    const row = document.createElement('div'); row.className='row';
+    const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[disabled]' : ''}`;
+    row.appendChild(label);
+    if(u.username !== 'mcassyblasty'){
+      const btn = document.createElement('button'); btn.textContent = u.disabled ? 'Enable' : 'Disable';
+      btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
+      row.appendChild(btn);
+    }
+    userList.appendChild(row);
+  }
+}
+
+async function boot(){
+  $('themeBtn').onclick = ()=>document.body.classList.toggle('discord');
+  $('logoutBtn').onclick = async()=>{ await api('/api/logout','POST',{}); state.me=null; showAuth('Logged out'); };
+  $('loginBtn').onclick = async()=>{
+    try { await api('/api/login','POST',{username:$('loginUser').value,password:$('loginPass').value}); await afterAuth(); }
+    catch(e){ showAuth(`Login failed: ${e.message}`); }
+  };
+  $('regBtn').onclick = async()=>{
+    try {
+      await api('/api/register','POST',{inviteToken:$('regInvite').value,username:$('regUser').value,displayName:$('regDisplay').value,password:$('regPass').value});
+      showAuth('Registered. Log in now.');
+    } catch(e){ showAuth(`Register failed: ${e.message}`); }
+  };
+  $('redeemBtn').onclick = async()=>{
+    try { const r = await api('/api/recovery/redeem','POST',{token:$('recoverToken').value}); state.redeemId = r.redeemId; showAuth('Token redeemed. Set new password.'); }
+    catch(e){ showAuth(`Redeem failed: ${e.message}`); }
+  };
+  $('resetBtn').onclick = async()=>{
+    try { await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value}); showAuth('Password reset complete.'); }
+    catch(e){ showAuth(`Reset failed: ${e.message}`); }
+  };
+
+  $('sendBtn').onclick = async()=>{
+    const body = $('msgInput').value.trim(); if(!body) return;
+    try { await api('/api/messages','POST',{body}); $('msgInput').value=''; }
+    catch(e){ alert(`send failed: ${e.message}`); }
+  };
+
+  $('createInviteBtn').onclick = async()=>{
+    const ttl = Number($('ttlDays').value || 7);
+    const r = await api('/api/admin/invites','POST',{ttlDays:ttl});
+    text($('inviteOut'), r.inviteUrl || '');
+    await refreshAdmin();
+  };
+
+  $('genRecoveryBtn').onclick = async()=>{
+    const r = await api('/api/admin/recovery','POST',{username:$('recoveryUser').value});
+    text($('recoveryOut'), r.recoveryUrl || '');
+  };
+
+  $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
+  $('saveSettingsBtn').onclick = async()=>{
+    const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value)});
+    setSpamEffective(Number(r.antiSpamLevel));
+  };
+
+  try { await afterAuth(); } catch { showAuth(); }
+}
+
+async function afterAuth(){
+  state.me = await api('/api/me');
+  text($('meLabel'), `@${state.me.username}`);
+  $('msgs').innerHTML=''; state.lastId = 0;
+  showApp();
+  await loadMessages();
+  connectWs();
+  await refreshAdmin();
+}
+
+boot();
+</script>
+</body>
+</html>
