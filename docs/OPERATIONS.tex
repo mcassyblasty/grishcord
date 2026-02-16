@@ -53,6 +53,14 @@ Printed URL format is always:
 http://<vm-ip>:<caddy-port>/
 \end{verbatim}
 
+\section{Versioning and release history}
+Use the top-level \texttt{VERSION} file as the canonical deployed version identifier.\\
+Track release notes in \texttt{docs/CHANGELOG.md}.\\
+Runtime API check:
+\begin{verbatim}
+curl -s http://<vm-ip>:<port>/api/version
+\end{verbatim}
+
 \section{Common failure modes and exact fixes}
 \begin{itemize}
   \item \textbf{Docker missing}: run \texttt{./scripts/fix_everything.sh}; it installs Docker/Compose.

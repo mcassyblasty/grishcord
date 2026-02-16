@@ -11,3 +11,7 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 - `docs/DEPLOYMENT.md`
 - `docs/NETWORKING.md`
 - `docs/OPERATIONS.tex`
+
+## Versioning
+- Canonical app version: `VERSION`
+- Release history: `docs/CHANGELOG.md`

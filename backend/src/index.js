@@ -30,6 +30,12 @@ const MAX_IMAGE_BYTES = Number(process.env.MAX_IMAGE_BYTES || 15 * 1024 * 1024);
 const RETENTION_THRESHOLD = Number(process.env.RETENTION_THRESHOLD_PCT || 90);
 const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS || 120000);
 const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || '/mnt/grishcord';
+
+const versionFile = path.join(process.cwd(), '..', 'VERSION');
+let APP_VERSION = process.env.APP_VERSION || '0.0.0';
+try {
+  APP_VERSION = (await fsp.readFile(versionFile, 'utf8')).trim() || APP_VERSION;
+} catch {}
 const spamPresets = {
   1: { burst: 3, sustained: 10, cooldown: 120 },
   3: { burst: 5, sustained: 15, cooldown: 60 },
@@ -88,7 +94,8 @@ function sanitizeBitrate(v) {
   return Math.max(16000, Math.min(64000, Math.round(n)));
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true, version: APP_VERSION }));
+app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
 
 app.post('/api/register', async (req, res) => {
   const { inviteToken, username, displayName, password } = req.body;

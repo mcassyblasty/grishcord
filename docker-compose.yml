@@ -29,6 +29,7 @@ services:
       RETENTION_THRESHOLD_PCT: ${RETENTION_THRESHOLD_PCT}
       RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS}
       MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES}
+      APP_VERSION: ${APP_VERSION}
     volumes:
       - /mnt/grishcord/uploads:/mnt/grishcord/uploads
     depends_on:

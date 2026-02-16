@@ -36,3 +36,9 @@ All persistent data is under `/mnt/grishcord` via bind mounts:
 
 ## Storage-full policy
 A retention sweeper runs automatically (default every 2 minutes). If `/mnt/grishcord` exceeds 90% utilization, oldest messages are deleted first; attached image files are deleted with their message references.
+
+
+## Version tracking
+- Canonical version: `VERSION`
+- Release history: `docs/CHANGELOG.md`
+- Runtime version check (after startup): `curl -s http://<vm-ip>:<port>/api/version`
