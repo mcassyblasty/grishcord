@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash text NOT NULL,
   session_version integer NOT NULL DEFAULT 1,
   disabled boolean NOT NULL DEFAULT false,
+  is_admin boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -80,3 +81,19 @@ CREATE TABLE IF NOT EXISTS message_uploads (
   upload_id bigint REFERENCES uploads(id) ON DELETE CASCADE,
   PRIMARY KEY(message_id, upload_id)
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id bigserial PRIMARY KEY,
+  user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message_id bigint NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  channel_id bigint REFERENCES channels(id) ON DELETE SET NULL,
+  dm_peer_id bigint REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (kind IN ('dm', 'ping'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS notifications_unique_user_message_kind
+ON notifications(user_id, message_id, kind);

@@ -115,6 +115,7 @@ async function runMigrations() {
     ) AS x(name, kind, position)
     WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.name = x.name AND c.kind = x.kind)
   `);
+  await pool.query('UPDATE users SET is_admin = true WHERE username = $1', [ADMIN_USERNAME]);
 }
 
 function auth(req, res, next) {
@@ -130,15 +131,19 @@ function auth(req, res, next) {
 }
 
 async function enforceSessionVersion(req, res, next) {
-  const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color FROM users WHERE id = $1', [req.user.sub]);
+  const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color, is_admin FROM users WHERE id = $1', [req.user.sub]);
   const user = rows[0];
   if (!user || user.disabled || user.session_version !== req.user.sv) return res.status(401).json({ error: 'session_expired' });
   req.userDb = user;
   next();
 }
 
+function userCanAdmin(user) {
+  return Boolean(user && (user.username === ADMIN_USERNAME || user.is_admin));
+}
+
 function adminOnly(req, res, next) {
-  if (req.userDb.username !== ADMIN_USERNAME) return res.status(403).json({ error: 'admin_only' });
+  if (!userCanAdmin(req.userDb)) return res.status(403).json({ error: 'admin_only' });
   next();
 }
 
@@ -162,6 +167,18 @@ function sessionCookieOptions(req) {
 
 app.get('/health', (_req, res) => res.json({ ok: true, version: APP_VERSION }));
 app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
+
+app.get('/api/voice/config', auth, enforceSessionVersion, async (_req, res) => {
+  const raw = String(process.env.VOICE_ICE_SERVERS || '').trim();
+  let iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) iceServers = parsed;
+    } catch {}
+  }
+  res.json({ iceServers });
+});
 
 app.post('/api/register', async (req, res) => {
   const { inviteToken, username, displayName, password } = req.body;
@@ -197,8 +214,11 @@ app.post('/api/logout', async (req, res) => {
 });
 
 app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT id, username, display_name, display_color FROM users WHERE id=$1', [req.user.sub]);
-  res.json(rows[0]);
+  const { rows } = await pool.query('SELECT id, username, display_name, display_color, is_admin FROM users WHERE id=$1', [req.user.sub]);
+  const me = rows[0] || null;
+  if (!me) return res.status(404).json({ error: 'not_found' });
+  me.is_admin = userCanAdmin(me);
+  res.json(me);
 });
 
 app.patch('/api/me/profile', auth, enforceSessionVersion, async (req, res) => {
@@ -278,7 +298,7 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
 
 app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
-  const users = await pool.query('SELECT id, username, display_name, disabled, created_at FROM users ORDER BY id ASC');
+  const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, created_at FROM users ORDER BY id ASC');
   const channels = await pool.query('SELECT id, name, kind, position, archived FROM channels ORDER BY kind ASC, position ASC, id ASC');
   const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2)', ['anti_spam_level', 'voice_bitrate']);
   const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
@@ -307,7 +327,19 @@ app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly
 
 app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const disabled = req.body.disabled === true;
-  await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3', [disabled, Number(req.params.id), ADMIN_USERNAME]);
+  await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3 AND is_admin = false', [disabled, Number(req.params.id), ADMIN_USERNAME]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/admin', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const isAdmin = req.body.isAdmin === true;
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
+  const user = u.rows[0];
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  if (user.username === ADMIN_USERNAME) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
+  await pool.query('UPDATE users SET is_admin = $1 WHERE id = $2', [isAdmin, id]);
   res.json({ ok: true });
 });
 
@@ -322,7 +354,8 @@ app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, 
   const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
   const user = u.rows[0];
   if (!user) return res.status(404).json({ error: 'not_found' });
-  if (user.username === ADMIN_USERNAME) return res.status(400).json({ error: 'cannot_delete_admin' });
+  const ua = await pool.query('SELECT is_admin FROM users WHERE id = $1', [id]);
+  if (user.username === ADMIN_USERNAME || ua.rows[0]?.is_admin) return res.status(400).json({ error: 'cannot_delete_admin' });
   if (confirmUsername !== user.username) return res.status(400).json({ error: 'confirm_username_mismatch' });
 
   const client = await pool.connect();
@@ -396,6 +429,54 @@ app.post('/api/recovery/reset', async (req, res) => {
   res.json({ ok: true });
 });
 
+
+function normalizeMentionKey(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function extractMentionTokens(body = '') {
+  const out = [];
+  const re = /(^|\s)@([A-Za-z0-9_.-]+)/g;
+  let m;
+  while ((m = re.exec(String(body || ''))) !== null) out.push(normalizeMentionKey(m[2]));
+  return [...new Set(out.filter(Boolean))];
+}
+
+async function createNotificationsForMessage(msg, author) {
+  const recipients = new Map();
+  if (msg.dm_peer_id) {
+    const peerId = Number(msg.dm_peer_id);
+    if (peerId && peerId !== Number(author.id)) recipients.set(peerId, { kind: 'dm', dmPeerId: Number(author.id), channelId: null });
+  }
+  const mentionKeys = extractMentionTokens(msg.body || '');
+  if (mentionKeys.length) {
+    const { rows } = await pool.query('SELECT id, username, display_name FROM users WHERE id <> $1', [author.id]);
+    for (const u of rows) {
+      const keys = [normalizeMentionKey(u.username), normalizeMentionKey(u.display_name)].filter(Boolean);
+      if (keys.some((k) => mentionKeys.includes(k))) {
+        const existing = recipients.get(Number(u.id));
+        recipients.set(Number(u.id), {
+          kind: existing?.kind === 'dm' ? 'dm' : 'ping',
+          dmPeerId: msg.dm_peer_id ? Number(author.id) : null,
+          channelId: msg.channel_id ? Number(msg.channel_id) : null
+        });
+      }
+    }
+  }
+  const out = [];
+  for (const [userId, meta] of recipients.entries()) {
+    const r = await pool.query(
+      `INSERT INTO notifications(user_id, message_id, kind, channel_id, dm_peer_id)
+       VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id, message_id, kind) DO UPDATE SET created_at = now()
+       RETURNING id, user_id, message_id, kind, channel_id, dm_peer_id, created_at`,
+      [userId, msg.id, meta.kind, meta.channelId, meta.dmPeerId]
+    );
+    out.push(r.rows[0]);
+  }
+  return out;
+}
+
 app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   const { channelId = null, dmPeerId = null, body, replyToId = null, uploadIds = [] } = req.body;
   if (req.userDb.disabled) return res.status(403).json({ error: 'disabled' });
@@ -442,6 +523,26 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   };
   const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+
+  const created = await createNotificationsForMessage(enriched, req.userDb);
+  for (const n of created) {
+    for (const c of wss.clients) {
+      if (c.readyState !== 1 || Number(c.voice?.userId || 0) !== Number(n.user_id)) continue;
+      c.send(JSON.stringify({
+        type: 'notification',
+        data: {
+          id: n.id,
+          messageId: n.message_id,
+          mode: n.dm_peer_id ? 'dm' : 'channel',
+          channelId: n.channel_id ? Number(n.channel_id) : null,
+          dmPeerId: n.dm_peer_id ? Number(n.dm_peer_id) : null,
+          createdAt: n.created_at,
+          title: n.kind === 'dm' ? `DM from ${req.userDb.display_name || req.userDb.username}` : `Ping from ${req.userDb.display_name || req.userDb.username}`,
+          preview: (enriched.body || '').slice(0, 140) || '(attachment)'
+        }
+      }));
+    }
+  }
   res.json(enriched);
 });
 
@@ -453,7 +554,7 @@ app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => 
   const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
-  if (Number(m.author_id) !== Number(req.user.sub) && req.userDb.username !== ADMIN_USERNAME) return res.status(403).json({ error: 'forbidden' });
+  if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
   const r = await pool.query('UPDATE messages SET body = $1 WHERE id = $2 RETURNING id', [body, id]);
   const payload = JSON.stringify({ type: 'message_edited', data: { id: r.rows[0].id, body } });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
@@ -466,7 +567,7 @@ app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) =>
   const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
-  if (Number(m.author_id) !== Number(req.user.sub) && req.userDb.username !== ADMIN_USERNAME) return res.status(403).json({ error: 'forbidden' });
+  if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
   const r = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
   const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
@@ -546,6 +647,53 @@ app.get('/api/uploads/:id', auth, enforceSessionVersion, async (req, res) => {
   res.setHeader('Content-Type', u.content_type);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   fs.createReadStream(path.join(uploadsDir, u.storage_name)).pipe(res);
+});
+
+
+app.get('/api/notifications', auth, enforceSessionVersion, async (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit || 60)));
+  const { rows } = await pool.query(`
+    SELECT n.id, n.message_id, n.kind, n.channel_id, n.dm_peer_id, n.created_at,
+           m.body,
+           au.username AS author_username,
+           au.display_name AS author_display_name
+    FROM notifications n
+    JOIN messages m ON m.id = n.message_id
+    JOIN users au ON au.id = m.author_id
+    WHERE n.user_id = $1
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT $2
+  `, [req.user.sub, limit]);
+  res.json(rows.map((r) => ({
+    id: Number(r.id),
+    messageId: Number(r.message_id),
+    mode: r.dm_peer_id ? 'dm' : 'channel',
+    channelId: r.channel_id ? Number(r.channel_id) : null,
+    dmPeerId: r.dm_peer_id ? Number(r.dm_peer_id) : null,
+    createdAt: r.created_at,
+    title: r.kind === 'dm' ? `DM from ${r.author_display_name || r.author_username}` : `Ping from ${r.author_display_name || r.author_username}`,
+    preview: String(r.body || '').slice(0, 140) || '(attachment)'
+  })));
+});
+
+app.delete('/api/notifications/:id', auth, enforceSessionVersion, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  await pool.query('DELETE FROM notifications WHERE id = $1 AND user_id = $2', [id, req.user.sub]);
+  res.json({ ok: true });
+});
+
+app.get('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const { rows } = await pool.query('SELECT id, author_id, channel_id, dm_peer_id FROM messages WHERE id = $1', [id]);
+  const m = rows[0];
+  if (!m) return res.status(404).json({ error: 'not_found' });
+  if (m.channel_id) return res.json({ id: Number(m.id), channelId: Number(m.channel_id), dmPeerId: null });
+  const me = Number(req.user.sub);
+  if (Number(m.author_id) !== me && Number(m.dm_peer_id) !== me) return res.status(403).json({ error: 'forbidden' });
+  const peer = Number(m.author_id) === me ? Number(m.dm_peer_id) : Number(m.author_id);
+  res.json({ id: Number(m.id), channelId: null, dmPeerId: peer });
 });
 
 wss.on('connection', async (ws, req) => {

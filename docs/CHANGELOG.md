@@ -4,6 +4,24 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.29] - 2026-02-17
+### Changed
+- Added frontend sound integration for notification WAV assets under `frontend/audio/` with resilient filename fallback loading.
+
+### Fixed
+- Incoming ping/DM websocket notifications now trigger the message-received sound so users hear alerts when mentioned or messaged.
+
+## [0.3.28] - 2026-02-17
+### Changed
+- Admin access now supports multiple admins: the primary hard-coded admin remains authoritative, and additional admins can be toggled from Admin Settings with an `is admin` checkbox per user.
+- Replaced blocking browser `alert/confirm/prompt` flows in the app shell with themed non-blocking toasts and modal prompts for message/channel/admin actions.
+- Voice WebRTC setup now loads ICE server configuration from the backend (`/api/voice/config`) so deployments can provide TURN/STUN without client code edits.
+
+### Fixed
+- Notifications are now persistent across refresh/session reconnects via backend-backed notification records instead of in-memory-only state.
+- Clicking a notification now consumes it server-side and performs a stronger jump-to-message flow using a message-lookup API before focusing the target message.
+- Admin moderation checks are now unified so delegated admins can use moderation actions consistently with backend authorization.
+
 ## [0.3.27] - 2026-02-17
 ### Changed
 - Message editing now uses inline in-message edit mode (textarea with Save/Cancel, Enter-to-save and Escape-to-cancel) instead of browser prompt dialogs for a Discord-like workflow.

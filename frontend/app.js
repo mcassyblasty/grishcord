@@ -23,7 +23,12 @@ const state = {
   pendingImagePreviewUrl: '',
   dmSearchQuery: '',
   notifications: [],
-  unreadNotifications: 0
+  unreadNotifications: 0,
+  voiceIceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
+  sounds: {
+    messageReceived: null,
+    genericNotify: null
+  }
 };
 
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
@@ -35,6 +40,117 @@ function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $(
 function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); $('notifMenuWrap').classList.remove('hidden'); clearNotice(); }
 function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
 function setBusy(btn, busy){ if(!btn) return; btn.disabled = busy; btn.textContent = busy ? 'Working...' : (btn.dataset.label || btn.textContent); }
+
+function showToast(message, kind = 'ok', ms = 2800) {
+  const stack = $('toastStack');
+  if (!stack) return;
+  const t = document.createElement('div');
+  t.className = `toast ${kind === 'error' ? 'error' : 'ok'}`;
+  t.textContent = message;
+  stack.appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
+
+function showError(message) {
+  showToast(message, 'error', 3800);
+}
+
+function askModal({ title = 'Confirm', message = '', confirmText = 'OK', cancelText = 'Cancel', withInput = false, inputValue = '', inputPlaceholder = '' }) {
+  return new Promise((resolve) => {
+    const overlay = $('uiPromptOverlay');
+    const titleEl = $('uiPromptTitle');
+    const textEl = $('uiPromptText');
+    const okBtn = $('uiPromptOkBtn');
+    const cancelBtn = $('uiPromptCancelBtn');
+    const input = $('uiPromptInput');
+    if (!overlay || !okBtn || !cancelBtn || !titleEl || !textEl || !input) return resolve(null);
+    titleEl.textContent = title;
+    textEl.textContent = message;
+    okBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+    input.classList.toggle('hidden', !withInput);
+    input.value = withInput ? inputValue : '';
+    input.placeholder = withInput ? inputPlaceholder : '';
+    overlay.classList.remove('hidden');
+
+    const cleanup = (out) => {
+      overlay.classList.add('hidden');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      overlay.onclick = null;
+      input.onkeydown = null;
+      resolve(out);
+    };
+    okBtn.onclick = () => cleanup(withInput ? input.value : true);
+    cancelBtn.onclick = () => cleanup(null);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); okBtn.click(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelBtn.click(); }
+    };
+    if (withInput) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    } else {
+      okBtn.focus();
+    }
+  });
+}
+
+async function askConfirm(message, title = 'Confirm') {
+  const out = await askModal({ title, message, confirmText: 'Confirm', cancelText: 'Cancel' });
+  return out === true;
+}
+
+async function askPrompt(message, initialValue = '', title = 'Input') {
+  const out = await askModal({ title, message, withInput: true, inputValue: initialValue, inputPlaceholder: 'Type here…', confirmText: 'Save', cancelText: 'Cancel' });
+  return out === null ? null : String(out);
+}
+
+function buildSound(paths = []) {
+  let i = 0;
+  let settled = false;
+  const a = new Audio();
+  a.preload = 'auto';
+  const pick = () => {
+    if (i >= paths.length) return;
+    a.src = paths[i];
+    a.load();
+  };
+  a.addEventListener('canplaythrough', () => { settled = true; }, { once: true });
+  a.addEventListener('error', () => {
+    if (settled) return;
+    i += 1;
+    if (i < paths.length) pick();
+  });
+  pick();
+  return a;
+}
+
+function initSounds() {
+  state.sounds.messageReceived = buildSound([
+    '/audio/message_received.wav',
+    '/audio/message-received.wav',
+    '/audio/message received.wav'
+  ]);
+  state.sounds.genericNotify = buildSound([
+    '/audio/notification.wav',
+    '/audio/notify.wav'
+  ]);
+}
+
+function playSound(audio) {
+  if (!audio || !audio.src) return;
+  try {
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch {}
+}
+
+function playIncomingMessageSound() {
+  playSound(state.sounds.messageReceived || state.sounds.genericNotify);
+}
 
 function humanError(err){
   const msg = String(err?.message || 'unknown_error');
@@ -53,6 +169,8 @@ function humanError(err){
   if (msg === 'invalid_reply_target') return 'Cannot reply to a message outside the current conversation.';
   if (msg === 'empty_body') return 'Message cannot be empty.';
   if (msg === 'forbidden') return 'You do not have permission for that action.';
+  if (msg === 'admin_only') return 'Admin access required.';
+  if (msg === 'cannot_demote_primary_admin') return 'Primary admin cannot be demoted.';
   return msg;
 }
 
@@ -183,7 +301,7 @@ function renderMessage(m){
   replyBtn.onclick = ()=> setReplyTarget(m);
   tools.appendChild(replyBtn);
 
-  const canModerate = state.me?.username === 'mcassyblasty' && state.adminMode;
+  const canModerate = Boolean(state.adminMode && (state.me?.username === 'mcassyblasty' || state.me?.is_admin));
   const own = Number(m.author_id) === Number(state.me?.id);
 
   if (own) {
@@ -224,7 +342,7 @@ function renderMessage(m){
           body.textContent = m.body;
           restore();
         } catch (err) {
-          alert(`Edit failed: ${humanError(err)}`);
+          showError(`Edit failed: ${humanError(err)}`);
         }
       };
 
@@ -257,12 +375,12 @@ function renderMessage(m){
     del.title = 'Delete message';
     del.textContent = '🗑️';
     del.onclick = async () => {
-      if (!confirm('Delete this message?')) return;
+      if (!await askConfirm('Delete this message?', 'Delete Message')) return;
       try {
         await api(`/api/messages/${m.id}`, 'DELETE');
         wrap.remove();
       } catch (err) {
-        alert(`Delete failed: ${humanError(err)}`);
+        showError(`Delete failed: ${humanError(err)}`);
       }
     };
     tools.appendChild(del);
@@ -426,28 +544,39 @@ function renderNotifications() {
   }
 }
 
-function addNotificationFromMessage(m) {
-  if (!state.me || Number(m.author_id) === Number(state.me.id)) return;
-  const ping = messageMentionsMe(m.body);
-  const isDm = Boolean(m.dm_user_a && m.dm_user_b);
-  if (!ping && !isDm) return;
-  const meId = Number(state.me.id || 0);
-  const dmPeerId = isDm ? (Number(m.dm_user_a) === meId ? Number(m.dm_user_b) : Number(m.dm_user_a)) : null;
-  const title = ping ? `Ping from ${messageAuthorLabel(m)}` : `DM from ${messageAuthorLabel(m)}`;
-  const preview = (m.body || '').slice(0, 140) || '(attachment)';
-  state.notifications.unshift({
-    id: Number(m.id),
-    mode: isDm ? 'dm' : 'channel',
-    channelId: m.channel_id ? Number(m.channel_id) : null,
-    dmPeerId,
-    createdAt: m.created_at || new Date().toISOString(),
-    title,
-    preview
-  });
-  state.notifications = state.notifications.filter((v, i, arr) => i === arr.findIndex((x) => x.id === v.id));
-  state.notifications = state.notifications.slice(0, 60);
-  state.unreadNotifications += 1;
+function upsertNotification(n, { markUnread = true } = {}) {
+  if (!n) return;
+  const item = {
+    id: Number(n.id),
+    messageId: Number(n.messageId || n.id),
+    mode: n.mode === 'dm' ? 'dm' : 'channel',
+    channelId: n.channelId ? Number(n.channelId) : null,
+    dmPeerId: n.dmPeerId ? Number(n.dmPeerId) : null,
+    createdAt: n.createdAt || new Date().toISOString(),
+    title: n.title || 'Notification',
+    preview: n.preview || ''
+  };
+  state.notifications = [item, ...state.notifications.filter((x) => Number(x.id) !== item.id)].slice(0, 60);
+  if (markUnread) state.unreadNotifications += 1;
   renderNotifications();
+}
+
+async function loadPersistentNotifications() {
+  try {
+    const rows = await api('/api/notifications?limit=60');
+    state.notifications = Array.isArray(rows) ? rows.map((n) => ({
+      id: Number(n.id),
+      messageId: Number(n.messageId || n.id),
+      mode: n.mode === 'dm' ? 'dm' : 'channel',
+      channelId: n.channelId ? Number(n.channelId) : null,
+      dmPeerId: n.dmPeerId ? Number(n.dmPeerId) : null,
+      createdAt: n.createdAt,
+      title: n.title || 'Notification',
+      preview: n.preview || ''
+    })) : [];
+    state.unreadNotifications = Math.min(state.notifications.length, 99);
+    renderNotifications();
+  } catch {}
 }
 
 function focusMessageById(messageId) {
@@ -464,26 +593,35 @@ async function openNotification(n) {
   $('notifMenu').classList.add('hidden');
   state.notifications = state.notifications.filter((x) => Number(x.id) !== Number(n.id));
   renderNotifications();
+  try { await api(`/api/notifications/${n.id}`, 'DELETE'); } catch {}
   setReplyTarget(null);
-  if (n.mode === 'dm' && n.dmPeerId) {
+
+  let target = { messageId: Number(n.messageId || n.id), channelId: n.channelId, dmPeerId: n.dmPeerId };
+  try {
+    const exact = await api(`/api/messages/${target.messageId}`);
+    target = { messageId: Number(exact.id), channelId: exact.channelId ? Number(exact.channelId) : null, dmPeerId: exact.dmPeerId ? Number(exact.dmPeerId) : null };
+  } catch {}
+
+  if (target.dmPeerId) {
     switchSidebarView('dms');
     state.mode = 'dm';
-    state.activeDmPeerId = n.dmPeerId;
+    state.activeDmPeerId = target.dmPeerId;
     state.activeChannelId = null;
-    const active = state.users.find((u) => Number(u.id) === Number(n.dmPeerId));
+    const active = state.users.find((u) => Number(u.id) === Number(target.dmPeerId));
     text($('chatHeader'), `DM: ${active?.display_name || active?.username || 'Direct Message'}`);
-  } else if (n.channelId) {
+  } else if (target.channelId) {
     switchSidebarView('server');
     state.mode = 'channel';
-    state.activeChannelId = Number(n.channelId);
+    state.activeChannelId = Number(target.channelId);
     state.activeDmPeerId = null;
-    const active = state.channels.find((c) => Number(c.id) === Number(n.channelId));
+    const active = state.channels.find((c) => Number(c.id) === Number(target.channelId));
     text($('chatHeader'), `# ${active?.name || 'channel'}`);
   }
   renderNavLists();
   await loadMessages();
   closeSidebarOnMobile();
-  focusMessageById(n.id);
+  focusMessageById(target.messageId);
+  setTimeout(() => focusMessageById(target.messageId), 180);
 }
 
 
@@ -534,8 +672,9 @@ function connectWs(){
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
-    if(msg.type === 'message' && msg.data){
-      addNotificationFromMessage(msg.data);
+    if (msg.type === 'notification' && msg.data) {
+      upsertNotification(msg.data, { markUnread: true });
+      if (msg.data.mode === 'dm' || String(msg.data.title || '').toLowerCase().includes('ping')) playIncomingMessageSound();
     }
     if(msg.type === 'message' && msg.data && isCurrentTarget(msg.data)){
       const placeholder = $('msgs').querySelector('.empty');
@@ -564,7 +703,7 @@ function connectWs(){
         state.activeDmPeerId = null;
       }
       refreshDms().catch(() => {});
-      if (state.me?.username === 'mcassyblasty') refreshAdmin().catch(() => {});
+      if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
     }
     handleVoiceSignal(msg).catch((err) => console.warn('voice signal error', err));
   };
@@ -578,6 +717,13 @@ async function loadVersion(){
   } catch {
     text($('versionLabel'), 'vunknown');
   }
+}
+
+async function loadVoiceConfig() {
+  try {
+    const r = await api('/api/voice/config');
+    if (Array.isArray(r.iceServers) && r.iceServers.length) state.voiceIceServers = r.iceServers;
+  } catch {}
 }
 
 function applyTheme(theme){
@@ -609,7 +755,7 @@ function focusComposer() {
 }
 
 async function refreshAdmin(){
-  if (!state.me || state.me.username !== 'mcassyblasty') {
+  if (!state.me || (!state.me.is_admin && state.me.username !== 'mcassyblasty')) {
     $('openAdminBtn').classList.add('hidden');
     return;
   }
@@ -640,7 +786,24 @@ async function refreshAdmin(){
     const row = document.createElement('div'); row.className='row';
     const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[frozen]' : ''}`;
     row.appendChild(label);
-    if(u.username !== 'mcassyblasty'){
+    if (u.username !== 'mcassyblasty') {
+      const adminLabel = document.createElement('label');
+      adminLabel.className = 'small';
+      const adminCheck = document.createElement('input');
+      adminCheck.type = 'checkbox';
+      adminCheck.checked = u.is_admin === true;
+      adminCheck.onchange = async () => {
+        try {
+          await api(`/api/admin/users/${u.id}/admin`, 'POST', { isAdmin: adminCheck.checked });
+          await refreshAdmin();
+        } catch (err) {
+          adminCheck.checked = !adminCheck.checked;
+          showError(`Admin role update failed: ${humanError(err)}`);
+        }
+      };
+      adminLabel.append(adminCheck, document.createTextNode(' is admin'));
+      row.appendChild(adminLabel);
+
       const btn = document.createElement('button');
       btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
       btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
@@ -700,7 +863,7 @@ async function refreshAdmin(){
               await loadMessages();
             }
           } catch (err) {
-            alert(`Delete user failed: ${humanError(err)}`);
+            showError(`Delete user failed: ${humanError(err)}`);
           }
         };
         const cancel = document.createElement('button');
@@ -789,7 +952,7 @@ async function leaveVoiceRoom() {
 function peerConnectionFor(targetUserId) {
   if (state.voice.peers.has(targetUserId)) return state.voice.peers.get(targetUserId);
   const pc = new RTCPeerConnection({
-    iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+    iceServers: Array.isArray(state.voiceIceServers) && state.voiceIceServers.length ? state.voiceIceServers : [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
   });
   const audio = new Audio();
   audio.autoplay = true;
@@ -853,7 +1016,7 @@ async function joinVoiceRoom(room) {
     state.voice.room = null;
     renderNavLists();
     updateVoiceStatus('Mic permission denied or unavailable');
-    alert(`Voice join failed: ${err.message || err}`);
+    showError(`Voice join failed: ${err.message || err}`);
   }
 }
 
@@ -908,19 +1071,19 @@ async function handleVoiceSignal(msg) {
 }
 
 function canInlineChannelAdmin() {
-  return state.me?.username === 'mcassyblasty' && state.adminMode;
+  return Boolean(state.adminMode && (state.me?.username === 'mcassyblasty' || state.me?.is_admin));
 }
 
 async function createChannelFromSidebar(kind) {
   if (!canInlineChannelAdmin()) return;
-  const raw = prompt(`New ${kind} channel name:`);
+  const raw = await askPrompt(`New ${kind} channel name:`, '', `Create ${kind} channel`);
   const name = String(raw || '').trim();
   if (!name) return;
   try {
     await api('/api/admin/channels', 'POST', { name, kind });
     await refreshChannels();
   } catch (err) {
-    alert(`Channel add failed: ${humanError(err)}`);
+    showError(`Channel add failed: ${humanError(err)}`);
   }
 }
 
@@ -937,7 +1100,7 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
   const rename = document.createElement('button');
   rename.textContent = 'Rename';
   rename.onclick = async () => {
-    const next = prompt('Rename channel', channel.name || '');
+    const next = await askPrompt('Rename channel', channel.name || '', 'Rename Channel');
     const name = String(next || '').trim();
     if (!name) return;
     await api(`/api/admin/channels/${channel.id}`, 'PATCH', { name });
@@ -954,7 +1117,7 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
   const archive = document.createElement('button');
   archive.textContent = 'Archive';
   archive.onclick = async () => {
-    if (!confirm(`Archive ${channel.kind} channel ${channel.name}?`)) return;
+    if (!await askConfirm(`Archive ${channel.kind} channel ${channel.name}?`, 'Archive Channel')) return;
     await api(`/api/admin/channels/${channel.id}`, 'DELETE');
     closeAnyChannelMenus();
     await onDone();
@@ -1026,7 +1189,7 @@ function renderNavLists(){
         try {
           renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
         } catch (err) {
-          alert(`Channel action failed: ${humanError(err)}`);
+          showError(`Channel action failed: ${humanError(err)}`);
         }
       };
       row.appendChild(menuBtn);
@@ -1041,7 +1204,7 @@ function renderNavLists(){
         const draggedRow = cl.querySelector(`.chanRow[data-channel-id="${draggedId}"]`);
         if (!draggedRow) return;
         cl.insertBefore(draggedRow, row);
-        try { await persistChannelOrder('text', cl); } catch (err) { alert(`Reorder failed: ${humanError(err)}`); }
+        try { await persistChannelOrder('text', cl); } catch (err) { showError(`Reorder failed: ${humanError(err)}`); }
       });
     }
 
@@ -1088,7 +1251,7 @@ function renderNavLists(){
         try {
           renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
         } catch (err) {
-          alert(`Channel action failed: ${humanError(err)}`);
+          showError(`Channel action failed: ${humanError(err)}`);
         }
       };
       row.appendChild(menuBtn);
@@ -1103,7 +1266,7 @@ function renderNavLists(){
         const draggedRow = vl.querySelector(`.chanRow[data-channel-id="${draggedId}"]`);
         if (!draggedRow) return;
         vl.insertBefore(draggedRow, row);
-        try { await persistChannelOrder('voice', vl); } catch (err) { alert(`Reorder failed: ${humanError(err)}`); }
+        try { await persistChannelOrder('voice', vl); } catch (err) { showError(`Reorder failed: ${humanError(err)}`); }
       });
     }
 
@@ -1163,6 +1326,7 @@ async function afterAuth(){
   state.notifications = [];
   state.unreadNotifications = 0;
   renderNotifications();
+  await loadPersistentNotifications();
   if ($('dmSearchInput')) $('dmSearchInput').value = '';
 
   state.mode = 'channel';
@@ -1178,6 +1342,7 @@ async function afterAuth(){
   await loadMessages();
   focusComposer();
   connectWs();
+  await loadVoiceConfig();
   await refreshAdmin();
 }
 
@@ -1197,7 +1362,7 @@ async function refreshChannels(){
     state.activeChannelId = state.channels.find((c)=>c.kind !== 'voice')?.id || null;
   }
   renderNavLists();
-  if (state.me?.username === 'mcassyblasty') refreshAdmin().catch(() => {});
+  if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
 }
 
 function renderChannelAdmin(){
@@ -1234,7 +1399,7 @@ function renderChannelAdmin(){
     const del = document.createElement('button');
     del.textContent = 'Archive';
     del.onclick = async()=>{
-      if (!confirm(`Archive ${c.kind} channel ${c.name}?`)) return;
+      if (!await askConfirm(`Archive ${c.kind} channel ${c.name}?`, 'Archive Channel')) return;
       await api(`/api/admin/channels/${c.id}`, 'DELETE');
       await refreshChannels();
       await refreshAdmin();
@@ -1261,6 +1426,7 @@ async function boot(){
   }
 
   applyTheme(localStorage.getItem('grishcord_theme') || 'oled');
+  initSounds();
   await loadVersion();
 
   $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
@@ -1314,9 +1480,9 @@ async function boot(){
       $('accountDisplayColor').value = color;
       $('accountDisplayColorHex').value = color;
       await loadMessages();
-      setNotice('Account settings updated.', 'ok');
+      showToast('Account settings updated.');
     } catch (err) {
-      alert(`Account update failed: ${humanError(err)}`);
+      showError(`Account update failed: ${humanError(err)}`);
     }
   };
 
@@ -1326,7 +1492,7 @@ async function boot(){
     const file = $('attachFile').files?.[0];
     if (!file) return;
     if (!String(file.type || '').startsWith('image/')) {
-      alert('Please choose an image file.');
+      showError('Please choose an image file.');
       return;
     }
     setPendingImage(file);
@@ -1501,7 +1667,7 @@ async function boot(){
       clearPendingImage();
       if (state.mode === 'dm') await refreshDms();
     } catch(err){
-      alert(`Send failed: ${humanError(err)}`);
+      showError(`Send failed: ${humanError(err)}`);
     }
   };
 
@@ -1525,7 +1691,7 @@ async function boot(){
       const url = r.inviteUrl || '';
       text($('inviteOut'), key ? `Invite key: ${key}${url ? `\nURL: ${url}` : ''}` : 'Invite generation returned no key.');
       await refreshAdmin();
-    } catch(err){ alert(`Invite generation failed: ${humanError(err)}`); }
+    } catch(err){ showError(`Invite generation failed: ${humanError(err)}`); }
   };
 
   $('genRecoveryBtn').onclick = async()=>{
@@ -1534,7 +1700,7 @@ async function boot(){
       const key = r.recoveryKey || '';
       const url = r.recoveryUrl || '';
       text($('recoveryOut'), key ? `Recovery key: ${key}${url ? `\nURL: ${url}` : ''}` : 'Recovery generation returned no key.');
-    } catch(err){ alert(`Recovery generation failed: ${humanError(err)}`); }
+    } catch(err){ showError(`Recovery generation failed: ${humanError(err)}`); }
   };
 
   $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
@@ -1542,7 +1708,7 @@ async function boot(){
     try {
       const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value)});
       setSpamEffective(Number(r.antiSpamLevel));
-    } catch(err){ alert(`Settings save failed: ${humanError(err)}`); }
+    } catch(err){ showError(`Settings save failed: ${humanError(err)}`); }
   };
 
   $('addChannelBtn').onclick = async()=>{
@@ -1553,7 +1719,7 @@ async function boot(){
       $('newChannelName').value = '';
       await refreshChannels();
       renderChannelAdmin();
-    } catch (err) { alert(`Channel add failed: ${humanError(err)}`); }
+    } catch (err) { showError(`Channel add failed: ${humanError(err)}`); }
   };
 
   try { await afterAuth(); }
