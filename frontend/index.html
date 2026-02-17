@@ -26,6 +26,13 @@
     button:disabled{opacity:.62;cursor:not-allowed}
     button.channel{width:100%;text-align:left;border-radius:8px;padding:.48rem .55rem;background:transparent}
     button.channel.active{border-color:var(--line);background:#ffffff14}
+    .sectionHead{display:flex;align-items:center;justify-content:space-between;gap:.35rem}
+    .sectionHead .small{font-weight:600;letter-spacing:.08em}
+    .sectionAddBtn,.chanMenuBtn{padding:.18rem .45rem;min-width:28px;min-height:26px;line-height:1;border-radius:7px}
+    .chanRow{display:flex;align-items:center;gap:.3rem}
+    .chanRow .channel{flex:1}
+    .chanRow.dragging{opacity:.55}
+    .chanRow.dropTarget{outline:1px dashed var(--accent);border-radius:8px}
     input,select,textarea{padding:.6rem;border:1px solid var(--line);border-radius:10px;background:#0002;color:var(--text)}
     select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:2rem}
     select option{background:var(--panel);color:var(--text)}
@@ -106,6 +113,7 @@
       #notifBtn .notifText{display:none}
       #notifBtn::before{content:"🔔"}
       .msgTools{top:.2rem;right:.2rem}
+      .sectionAddBtn,.chanMenuBtn{min-width:26px;min-height:24px;padding:.12rem .35rem}
     }
     @media (max-width:700px) and (orientation:portrait){
       .top{padding:.35rem .4rem;gap:.35rem}
@@ -212,6 +220,10 @@
       </div>
 
       <div id="serverSections">
+        <div id="textHeader" class="sectionHead"><div class="small">TEXT CHANNELS</div><button id="addTextChannelBtn" class="ghost sectionAddBtn hidden" title="Add text channel">＋</button></div>
+        <div class="stack" id="channelList"></div>
+        <div id="voiceSpacer" style="height:.45rem"></div>
+        <div id="voiceHeader" class="sectionHead"><div class="small">VOICE CHANNELS</div><button id="addVoiceChannelBtn" class="ghost sectionAddBtn hidden" title="Add voice channel">＋</button></div>
         <div class="small" style="letter-spacing:.08em;font-weight:600">TEXT CHANNELS</div>
         <div class="stack" id="channelList"></div>
         <div id="voiceSpacer" style="height:.45rem"></div>
@@ -253,6 +265,7 @@
           <div class="row"><label><input id="adminModeToggle" type="checkbox"> Enable moderation/editor mode</label></div>
           <div class="small">When enabled, message delete controls and channel editor are visible in-app.</div>
         </div>
+        <div class="card hidden" id="channelAdminCard">
         <div class="card" id="channelAdminCard">
           <h4>Channel Editor</h4>
           <div class="row">

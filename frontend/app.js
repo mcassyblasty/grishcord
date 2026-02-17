@@ -852,6 +852,85 @@ async function handleVoiceSignal(msg) {
   }
 }
 
+function canInlineChannelAdmin() {
+  return state.me?.username === 'mcassyblasty' && state.adminMode;
+}
+
+async function createChannelFromSidebar(kind) {
+  if (!canInlineChannelAdmin()) return;
+  const raw = prompt(`New ${kind} channel name:`);
+  const name = String(raw || '').trim();
+  if (!name) return;
+  try {
+    await api('/api/admin/channels', 'POST', { name, kind });
+    await refreshChannels();
+  } catch (err) {
+    alert(`Channel add failed: ${humanError(err)}`);
+  }
+}
+
+function closeAnyChannelMenus(root = document) {
+  for (const menu of root.querySelectorAll('.channelActionsMenu')) menu.remove();
+}
+
+function renderChannelActionMenu(anchorBtn, channel, onDone) {
+  closeAnyChannelMenus();
+  const menu = document.createElement('div');
+  menu.className = 'menuCard channelActionsMenu';
+  menu.style.right = '2rem';
+  menu.style.top = 'calc(100% - .2rem)';
+  const rename = document.createElement('button');
+  rename.textContent = 'Rename';
+  rename.onclick = async () => {
+    const next = prompt('Rename channel', channel.name || '');
+    const name = String(next || '').trim();
+    if (!name) return;
+    await api(`/api/admin/channels/${channel.id}`, 'PATCH', { name });
+    closeAnyChannelMenus();
+    await onDone();
+  };
+  const toggle = document.createElement('button');
+  toggle.textContent = channel.archived ? 'Enable' : 'Hide';
+  toggle.onclick = async () => {
+    await api(`/api/admin/channels/${channel.id}`, 'PATCH', { archived: !channel.archived });
+    closeAnyChannelMenus();
+    await onDone();
+  };
+  const archive = document.createElement('button');
+  archive.textContent = 'Archive';
+  archive.onclick = async () => {
+    if (!confirm(`Archive ${channel.kind} channel ${channel.name}?`)) return;
+    await api(`/api/admin/channels/${channel.id}`, 'DELETE');
+    closeAnyChannelMenus();
+    await onDone();
+  };
+  menu.append(rename, toggle, archive);
+  anchorBtn.parentElement.appendChild(menu);
+}
+
+async function persistChannelOrder(kind, container) {
+  const rows = [...container.querySelectorAll('.chanRow')];
+  for (let i = 0; i < rows.length; i += 1) {
+    const id = Number(rows[i].dataset.channelId || 0);
+    if (!id) continue;
+    await api(`/api/admin/channels/${id}`, 'PATCH', { position: i + 1 });
+  }
+  await refreshChannels();
+}
+
+function renderNavLists(){
+  const canAdmin = canInlineChannelAdmin();
+  $('addTextChannelBtn')?.classList.toggle('hidden', !canAdmin);
+  $('addVoiceChannelBtn')?.classList.toggle('hidden', !canAdmin);
+
+  const cl = $('channelList'); cl.textContent='';
+  const textChannels = state.channels.filter((x) => x.kind !== 'voice');
+  for (const c of textChannels){
+    const row = document.createElement('div');
+    row.className = 'chanRow';
+    row.dataset.channelId = String(c.id);
+    row.draggable = canAdmin;
+
 function renderNavLists(){
   const cl = $('channelList'); cl.textContent='';
   for (const c of state.channels.filter((x) => x.kind !== 'voice')){
@@ -870,6 +949,43 @@ function renderNavLists(){
       await loadMessages();
       closeSidebarOnMobile();
     };
+    row.appendChild(b);
+
+    if (canAdmin) {
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'ghost chanMenuBtn';
+      menuBtn.textContent = '⋯';
+      menuBtn.title = 'Channel actions';
+      menuBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
+        } catch (err) {
+          alert(`Channel action failed: ${humanError(err)}`);
+        }
+      };
+      row.appendChild(menuBtn);
+
+      row.addEventListener('dragstart', (e) => {
+        row.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', String(c.id));
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('dropTarget'); });
+      row.addEventListener('dragleave', () => row.classList.remove('dropTarget'));
+      row.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        row.classList.remove('dropTarget');
+        const draggedId = Number(e.dataTransfer.getData('text/plain') || 0);
+        if (!draggedId || draggedId === c.id) return;
+        const draggedRow = cl.querySelector(`.chanRow[data-channel-id="${draggedId}"]`);
+        if (!draggedRow) return;
+        cl.insertBefore(draggedRow, row);
+        try { await persistChannelOrder('text', cl); } catch (err) { alert(`Reorder failed: ${humanError(err)}`); }
+      });
+    }
+
+    cl.appendChild(row);
     cl.appendChild(b);
   }
 
@@ -878,12 +994,54 @@ function renderNavLists(){
   $('voiceHeader')?.classList.toggle('hidden', voiceChannels.length === 0);
   $('voiceSpacer')?.classList.toggle('hidden', voiceChannels.length === 0);
   for (const c of voiceChannels) {
+    const row = document.createElement('div');
+    row.className = 'chanRow';
+    row.dataset.channelId = String(c.id);
+    row.draggable = canAdmin;
+
     const b = document.createElement('button');
     const activeVoice = state.voice.room === c.name;
     b.className = `channel ${activeVoice ? 'active' : ''}`;
     b.textContent = `${activeVoice ? '🔊 Leave' : '🔈 Join'} ${c.name}`;
     b.title = activeVoice ? `Leave ${c.name}` : `Join ${c.name}`;
     b.onclick = ()=> joinVoiceRoom(c.name);
+    row.appendChild(b);
+
+    if (canAdmin) {
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'ghost chanMenuBtn';
+      menuBtn.textContent = '⋯';
+      menuBtn.title = 'Channel actions';
+      menuBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
+        } catch (err) {
+          alert(`Channel action failed: ${humanError(err)}`);
+        }
+      };
+      row.appendChild(menuBtn);
+
+      row.addEventListener('dragstart', (e) => {
+        row.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', String(c.id));
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('dropTarget'); });
+      row.addEventListener('dragleave', () => row.classList.remove('dropTarget'));
+      row.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        row.classList.remove('dropTarget');
+        const draggedId = Number(e.dataTransfer.getData('text/plain') || 0);
+        if (!draggedId || draggedId === c.id) return;
+        const draggedRow = vl.querySelector(`.chanRow[data-channel-id="${draggedId}"]`);
+        if (!draggedRow) return;
+        vl.insertBefore(draggedRow, row);
+        try { await persistChannelOrder('voice', vl); } catch (err) { alert(`Reorder failed: ${humanError(err)}`); }
+      });
+    }
+
+    vl.appendChild(row);
     vl.appendChild(b);
   }
 
@@ -914,6 +1072,7 @@ function renderNavLists(){
     dl.appendChild(b);
   }
 }
+
 
 async function afterAuth(){
   state.me = await api('/api/me');
@@ -1046,6 +1205,7 @@ async function boot(){
     if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
     if (!$('notifMenuWrap').contains(e.target)) $('notifMenu').classList.add('hidden');
     closeSidebarIfMobileOutsideClick(e);
+    if (!e.target.closest('.chanMenuBtn') && !e.target.closest('.channelActionsMenu')) closeAnyChannelMenus();
   });
 
   window.addEventListener('resize', () => {
@@ -1176,6 +1336,9 @@ async function boot(){
     renderNavLists();
     loadMessages().catch(()=>{});
   };
+
+  $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar('text');
+  $('addVoiceChannelBtn').onclick = ()=> createChannelFromSidebar('voice');
 
   $('authActionSelect').onchange = ()=> {
     const v = $('authActionSelect').value;

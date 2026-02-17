@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.24] - 2026-02-17
+### Changed
+- Channel administration is now inline in the server sidebar when Admin Mode is enabled: add buttons appear next to Text/Voice headers, per-channel three-dot action menus are available on each row, and drag-and-drop reorder is supported for text and voice lists.
+- Deprecated the old modal-based channel editor card in favor of in-context sidebar controls for admin channel management.
+
 ## [0.3.23] - 2026-02-16
 ### Fixed
 - Composer placeholder text is now mobile-aware: portrait/mobile views show the shorter `Plain-text message` prompt instead of desktop keyboard guidance text.
