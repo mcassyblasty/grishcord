@@ -4,6 +4,13 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.27] - 2026-02-17
+### Changed
+- Message editing now uses inline in-message edit mode (textarea with Save/Cancel, Enter-to-save and Escape-to-cancel) instead of browser prompt dialogs for a Discord-like workflow.
+
+### Fixed
+- Navigation now places focus into the primary input for that area (server/DM composer, DM search when no DM selected, account display-name input when opening Settings, login username on auth view).
+
 ## [0.3.26] - 2026-02-17
 ### Fixed
 - DM switch behavior on mobile now keeps the DM list open so users can choose a conversation instead of immediately collapsing the sidebar.

@@ -31,7 +31,7 @@ const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,c
 function text(el, v){ el.textContent = v; }
 function clearNotice(){ const n=$('authMsg'); n.classList.remove('error','ok'); n.classList.add('hidden'); text(n,''); }
 function setNotice(msg, kind='error'){ const n=$('authMsg'); n.classList.remove('hidden','error','ok'); if(kind) n.classList.add(kind); text(n,msg); }
-function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); $('notifMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); }
+function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); $('notifMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); $('loginUser')?.focus(); }
 function showApp(){ $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('settingsMenuWrap').classList.remove('hidden'); $('notifMenuWrap').classList.remove('hidden'); clearNotice(); }
 function fmtTs(v){ try { return new Date(v).toLocaleString(); } catch { return String(v||''); } }
 function setBusy(btn, busy){ if(!btn) return; btn.disabled = busy; btn.textContent = busy ? 'Working...' : (btn.dataset.label || btn.textContent); }
@@ -192,14 +192,61 @@ function renderMessage(m){
     edit.title = 'Edit message';
     edit.textContent = '✏️';
     edit.onclick = async()=>{
-      const next = prompt('Edit message', m.body || '');
-      if (next === null) return;
-      try {
-        const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next });
-        body.textContent = r.body || next;
-      } catch (err) {
-        alert(`Edit failed: ${humanError(err)}`);
-      }
+      if (wrap.querySelector('.editWrap')) return;
+      const editWrap = document.createElement('div');
+      editWrap.className = 'editWrap';
+      const ta = document.createElement('textarea');
+      ta.value = m.body || '';
+      ta.maxLength = 10000;
+      ta.style.width = '100%';
+      ta.style.minHeight = '74px';
+      ta.style.resize = 'vertical';
+      const actions = document.createElement('div');
+      actions.className = 'row';
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save';
+      saveBtn.className = 'primary';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.className = 'ghost';
+
+      const restore = () => {
+        editWrap.remove();
+        body.classList.remove('hidden');
+      };
+
+      const submitEdit = async () => {
+        const next = ta.value;
+        if (!next.trim()) return;
+        try {
+          const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next });
+          m.body = r.body || next;
+          body.textContent = m.body;
+          restore();
+        } catch (err) {
+          alert(`Edit failed: ${humanError(err)}`);
+        }
+      };
+
+      saveBtn.onclick = submitEdit;
+      cancelBtn.onclick = restore;
+      ta.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          submitEdit();
+        }
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          restore();
+        }
+      });
+
+      actions.append(saveBtn, cancelBtn);
+      editWrap.append(ta, actions);
+      body.classList.add('hidden');
+      wrap.insertBefore(editWrap, tools);
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
     };
     tools.appendChild(edit);
   }
@@ -551,6 +598,14 @@ function setComposerEnabled(enabled, placeholder = null) {
   $('msgInput').disabled = !enabled;
   $('sendBtn').disabled = !enabled;
   $('msgInput').placeholder = placeholder ?? defaultComposerPlaceholder();
+}
+
+function focusComposer() {
+  const input = $('msgInput');
+  if (!input || input.disabled) return;
+  input.focus();
+  const len = input.value.length;
+  input.setSelectionRange(len, len);
 }
 
 async function refreshAdmin(){
@@ -944,6 +999,7 @@ function renderNavLists(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      focusComposer();
       closeSidebarOnMobile();
     };
     row.appendChild(b);
@@ -1076,6 +1132,7 @@ function renderNavLists(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      focusComposer();
       closeSidebarOnMobile();
     };
     dl.appendChild(b);
@@ -1119,6 +1176,7 @@ async function afterAuth(){
   switchSidebarView('server');
   renderNavLists();
   await loadMessages();
+  focusComposer();
   connectWs();
   await refreshAdmin();
 }
@@ -1217,8 +1275,11 @@ async function boot(){
     }
   };
   $('settingsBtn').onclick = ()=> {
-    $('settingsMenu').classList.toggle('hidden');
+    const menu = $('settingsMenu');
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden');
     $('notifMenu').classList.add('hidden');
+    if (willOpen) $('accountDisplayName')?.focus();
   };
   document.addEventListener('click', (e)=>{
     if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
@@ -1330,6 +1391,7 @@ async function boot(){
       setComposerEnabled(true);
       renderNavLists();
       await loadMessages();
+      focusComposer();
       closeSidebarOnMobile();
     }
   };
@@ -1344,10 +1406,12 @@ async function boot(){
       text($('chatHeader'), `DM: ${active.display_name}`);
       setComposerEnabled(true);
       await loadMessages();
+      focusComposer();
       return;
     }
     state.activeDmPeerId = null;
     showDmLanding();
+    $('dmSearchInput')?.focus();
   };
 
   $('adminModeToggle').onchange = ()=> {
