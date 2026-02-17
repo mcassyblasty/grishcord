@@ -929,11 +929,8 @@ function renderNavLists(){
     const row = document.createElement('div');
     row.className = 'chanRow';
     row.dataset.channelId = String(c.id);
-    row.draggable = canAdmin;
+    row.draggable = false;
 
-function renderNavLists(){
-  const cl = $('channelList'); cl.textContent='';
-  for (const c of state.channels.filter((x) => x.kind !== 'voice')){
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='channel' && state.activeChannelId===c.id ? 'active':''}`;
     b.textContent = `# ${c.name}`;
@@ -952,6 +949,18 @@ function renderNavLists(){
     row.appendChild(b);
 
     if (canAdmin) {
+      const dragBtn = document.createElement('button');
+      dragBtn.className = 'ghost chanDragHandle';
+      dragBtn.textContent = '↕';
+      dragBtn.title = 'Drag to reorder';
+      dragBtn.draggable = true;
+      dragBtn.addEventListener('dragstart', (e) => {
+        row.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', String(c.id));
+      });
+      dragBtn.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.appendChild(dragBtn);
+
       const menuBtn = document.createElement('button');
       menuBtn.className = 'ghost chanMenuBtn';
       menuBtn.textContent = '⋯';
@@ -959,18 +968,13 @@ function renderNavLists(){
       menuBtn.onclick = async (e) => {
         e.stopPropagation();
         try {
-          await renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
+          renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
         } catch (err) {
           alert(`Channel action failed: ${humanError(err)}`);
         }
       };
       row.appendChild(menuBtn);
 
-      row.addEventListener('dragstart', (e) => {
-        row.classList.add('dragging');
-        e.dataTransfer.setData('text/plain', String(c.id));
-      });
-      row.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('dropTarget'); });
       row.addEventListener('dragleave', () => row.classList.remove('dropTarget'));
       row.addEventListener('drop', async (e) => {
@@ -986,7 +990,6 @@ function renderNavLists(){
     }
 
     cl.appendChild(row);
-    cl.appendChild(b);
   }
 
   const vl = $('voiceList'); vl.textContent='';
@@ -997,7 +1000,7 @@ function renderNavLists(){
     const row = document.createElement('div');
     row.className = 'chanRow';
     row.dataset.channelId = String(c.id);
-    row.draggable = canAdmin;
+    row.draggable = false;
 
     const b = document.createElement('button');
     const activeVoice = state.voice.room === c.name;
@@ -1008,6 +1011,18 @@ function renderNavLists(){
     row.appendChild(b);
 
     if (canAdmin) {
+      const dragBtn = document.createElement('button');
+      dragBtn.className = 'ghost chanDragHandle';
+      dragBtn.textContent = '↕';
+      dragBtn.title = 'Drag to reorder';
+      dragBtn.draggable = true;
+      dragBtn.addEventListener('dragstart', (e) => {
+        row.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', String(c.id));
+      });
+      dragBtn.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.appendChild(dragBtn);
+
       const menuBtn = document.createElement('button');
       menuBtn.className = 'ghost chanMenuBtn';
       menuBtn.textContent = '⋯';
@@ -1015,18 +1030,13 @@ function renderNavLists(){
       menuBtn.onclick = async (e) => {
         e.stopPropagation();
         try {
-          await renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
+          renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
         } catch (err) {
           alert(`Channel action failed: ${humanError(err)}`);
         }
       };
       row.appendChild(menuBtn);
 
-      row.addEventListener('dragstart', (e) => {
-        row.classList.add('dragging');
-        e.dataTransfer.setData('text/plain', String(c.id));
-      });
-      row.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('dropTarget'); });
       row.addEventListener('dragleave', () => row.classList.remove('dropTarget'));
       row.addEventListener('drop', async (e) => {
@@ -1042,7 +1052,6 @@ function renderNavLists(){
     }
 
     vl.appendChild(row);
-    vl.appendChild(b);
   }
 
   const dl = $('dmList'); dl.textContent='';

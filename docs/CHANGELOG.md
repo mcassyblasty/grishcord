@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.25] - 2026-02-17
+### Fixed
+- Stabilized inline sidebar channel administration: drag-to-reorder now uses an explicit drag handle to avoid interfering with normal channel clicks.
+- Hardened inline channel action menu opening behavior to prevent async event noise when opening three-dot controls.
+
 ## [0.3.24] - 2026-02-17
 ### Changed
 - Channel administration is now inline in the server sidebar when Admin Mode is enabled: add buttons appear next to Text/Voice headers, per-channel three-dot action menus are available on each row, and drag-and-drop reorder is supported for text and voice lists.
