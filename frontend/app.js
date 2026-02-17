@@ -27,7 +27,8 @@ const state = {
   voiceIceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
   sounds: {
     messageReceived: null,
-    genericNotify: null
+    genericNotify: null,
+    fallbackCtx: null
   }
 };
 
@@ -139,17 +140,51 @@ function initSounds() {
   ]);
 }
 
+function playFallbackTone() {
+  if (state.me && state.me.notification_sounds_enabled === false) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  if (!state.sounds.fallbackCtx) state.sounds.fallbackCtx = new Ctx();
+  const ctx = state.sounds.fallbackCtx;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const now = ctx.currentTime;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+  gain.connect(ctx.destination);
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, now);
+  osc.connect(gain);
+  osc.start(now);
+  osc.stop(now + 0.17);
+}
+
 function playSound(audio) {
-  if (!audio || !audio.src) return;
+  if (state.me && state.me.notification_sounds_enabled === false) return;
+  if (!audio || !audio.src) {
+    playFallbackTone();
+    return;
+  }
   try {
     audio.currentTime = 0;
     const p = audio.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-  } catch {}
+    if (p && typeof p.catch === 'function') p.catch(() => playFallbackTone());
+  } catch {
+    playFallbackTone();
+  }
 }
 
 function playIncomingMessageSound() {
   playSound(state.sounds.messageReceived || state.sounds.genericNotify);
+}
+
+function updateNotifSoundToggleLabel() {
+  const btn = $('notifSoundToggleBtn');
+  if (!btn) return;
+  const enabled = state.me?.notification_sounds_enabled !== false;
+  btn.textContent = enabled ? 'Sounds: On' : 'Sounds: Off';
 }
 
 function humanError(err){
@@ -171,6 +206,8 @@ function humanError(err){
   if (msg === 'forbidden') return 'You do not have permission for that action.';
   if (msg === 'admin_only') return 'Admin access required.';
   if (msg === 'cannot_demote_primary_admin') return 'Primary admin cannot be demoted.';
+  if (msg === 'invalid_notification_preference') return 'Notification preference value is invalid.';
+  if (msg === 'invalid_role_state') return 'Role state is invalid.';
   return msg;
 }
 
@@ -766,20 +803,7 @@ async function refreshAdmin(){
   $('spamLevel').value = String(s.antiSpamLevel);
   $('voiceBitrate').value = String(s.voiceBitrate);
   setSpamEffective(Number(s.antiSpamLevel));
-
-  const inviteList = $('inviteList'); inviteList.textContent='';
-  for(const i of s.invites){
-    const row = document.createElement('div'); row.className='row';
-    const label = document.createElement('span');
-    label.textContent = `#${i.id} exp:${fmtTs(i.expires_at)} used:${i.used_at ? 'yes' : 'no'} revoked:${i.revoked_at ? 'yes' : 'no'}`;
-    row.appendChild(label);
-    if(!i.used_at && !i.revoked_at){
-      const btn = document.createElement('button'); btn.textContent='Revoke';
-      btn.onclick = async()=>{ await api(`/api/admin/invites/${i.id}/revoke`,'POST',{}); await refreshAdmin(); };
-      row.appendChild(btn);
-    }
-    inviteList.appendChild(row);
-  }
+  // Invite list is no longer rendered inline; CSV export is available instead.
 
   const userList = $('userList'); userList.textContent='';
   for(const u of s.users){
@@ -787,22 +811,38 @@ async function refreshAdmin(){
     const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[frozen]' : ''}`;
     row.appendChild(label);
     if (u.username !== 'mcassyblasty') {
+      const modLabel = document.createElement('label');
+      modLabel.className = 'small';
+      const modCheck = document.createElement('input');
+      modCheck.type = 'checkbox';
+      modCheck.checked = u.is_moderator === true;
+
       const adminLabel = document.createElement('label');
       adminLabel.className = 'small';
       const adminCheck = document.createElement('input');
       adminCheck.type = 'checkbox';
       adminCheck.checked = u.is_admin === true;
-      adminCheck.onchange = async () => {
+
+      const saveRoles = async () => {
         try {
-          await api(`/api/admin/users/${u.id}/admin`, 'POST', { isAdmin: adminCheck.checked });
+          await api(`/api/admin/users/${u.id}/roles`, 'POST', { isModerator: modCheck.checked, isAdmin: adminCheck.checked });
           await refreshAdmin();
         } catch (err) {
-          adminCheck.checked = !adminCheck.checked;
-          showError(`Admin role update failed: ${humanError(err)}`);
+          showError(`Role update failed: ${humanError(err)}`);
+          await refreshAdmin();
         }
       };
-      adminLabel.append(adminCheck, document.createTextNode(' is admin'));
-      row.appendChild(adminLabel);
+      modCheck.onchange = async () => {
+        if (adminCheck.checked && !modCheck.checked) adminCheck.checked = false;
+        await saveRoles();
+      };
+      adminCheck.onchange = async () => {
+        if (adminCheck.checked) modCheck.checked = true;
+        await saveRoles();
+      };
+      modLabel.append(modCheck, document.createTextNode(' moderator'));
+      adminLabel.append(adminCheck, document.createTextNode(' admin'));
+      row.append(modLabel, adminLabel);
 
       const btn = document.createElement('button');
       btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
@@ -1316,6 +1356,7 @@ function showDmLanding() {
 async function afterAuth(){
   state.me = await api('/api/me');
   text($('meLabel'), `@${state.me.username}`);
+  updateNotifSoundToggleLabel();
   $('accountDisplayName').value = state.me.display_name || '';
   const color = normalizeHex(state.me.display_color, '#FFFFFF');
   $('accountDisplayColor').value = color;
@@ -1431,6 +1472,7 @@ async function boot(){
 
   $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
   $('notifBtn').onclick = ()=> {
+    updateNotifSoundToggleLabel();
     const menu = $('notifMenu');
     const willOpen = menu.classList.contains('hidden');
     menu.classList.toggle('hidden');
@@ -1440,6 +1482,19 @@ async function boot(){
       renderNotifications();
     }
   };
+  $('notifSoundToggleBtn').onclick = async ()=> {
+    if (!state.me) return;
+    const next = !(state.me.notification_sounds_enabled === false);
+    try {
+      const updated = await api('/api/me/preferences', 'PATCH', { notificationSoundsEnabled: !next });
+      state.me = updated;
+      updateNotifSoundToggleLabel();
+      showToast(`Notification sounds ${state.me.notification_sounds_enabled === false ? 'disabled' : 'enabled'}.`);
+    } catch (err) {
+      showError(`Notification sound toggle failed: ${humanError(err)}`);
+    }
+  };
+
   $('settingsBtn').onclick = ()=> {
     const menu = $('settingsMenu');
     const willOpen = menu.classList.contains('hidden');
@@ -1475,6 +1530,8 @@ async function boot(){
       });
       state.me = updated;
       text($('meLabel'), `@${state.me.username}`);
+      updateNotifSoundToggleLabel();
+  updateNotifSoundToggleLabel();
       $('accountDisplayName').value = updated.display_name || '';
       const color = normalizeHex(updated.display_color || '#FFFFFF');
       $('accountDisplayColor').value = color;
@@ -1541,6 +1598,7 @@ async function boot(){
     state.unreadNotifications = 0;
     renderNotifications();
     text($('meLabel'), 'Not logged in');
+    updateNotifSoundToggleLabel();
     $('adminOverlay').classList.add('hidden');
     showAuth('Logged out.', 'ok');
   };
@@ -1692,6 +1750,25 @@ async function boot(){
       text($('inviteOut'), key ? `Invite key: ${key}${url ? `\nURL: ${url}` : ''}` : 'Invite generation returned no key.');
       await refreshAdmin();
     } catch(err){ showError(`Invite generation failed: ${humanError(err)}`); }
+  };
+
+  $('downloadInvitesBtn').onclick = async()=> {
+    try {
+      const res = await fetch('/api/admin/invites/export', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'invites-export.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('Invites export downloaded.');
+    } catch (err) {
+      showError(`Invite export failed: ${humanError(err)}`);
+    }
   };
 
   $('genRecoveryBtn').onclick = async()=>{

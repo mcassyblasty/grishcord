@@ -149,7 +149,10 @@
     <div class="menu hidden" id="notifMenuWrap">
       <button id="notifBtn" class="ghost"><span class="notifText">Notifications</span> <span id="notifBadge" class="notifBadge hidden">0</span></button>
       <div class="menuCard hidden" id="notifMenu">
-        <div class="small">Recent DMs & Pings</div>
+        <div class="row" style="justify-content:space-between">
+          <div class="small">Recent DMs & Pings</div>
+          <button id="notifSoundToggleBtn" class="ghost" type="button">Sounds: On</button>
+        </div>
         <div id="notifList" class="notifList small"></div>
       </div>
     </div>
@@ -258,24 +261,14 @@
       <div class="small">Invite generation, recovery generation, anti-spam, bitrate, and account freeze.</div>
       <div class="stack">
         <div class="card">
-          <h4>Create Invite Key</h4>
-          <div class="row"><button id="createInviteBtn">Generate</button></div>
-          <div id="inviteOut" class="linkbox small">(key will appear here)</div>
-        </div>
-        <div class="card">
           <h4>Admin Mode</h4>
           <div class="row"><label><input id="adminModeToggle" type="checkbox"> Enable moderation/editor mode</label></div>
           <div class="small">When enabled, message delete controls and channel editor are visible in-app.</div>
         </div>
-        <div class="card hidden" id="channelAdminCard">
-          <h4>Channel Editor</h4>
-          <div class="row">
-            <input id="newChannelName" placeholder="channel name">
-            <select id="newChannelKind"><option value="text">text</option><option value="voice">voice</option></select>
-            <button id="addChannelBtn">Add</button>
-          </div>
-          <div id="channelAdminList" class="small"></div>
-          <div class="small" style="margin-top:.35rem">Hide/Unhide toggles are applied instantly for everyone.</div>
+        <div class="card">
+          <h4>Create Invite Key</h4>
+          <div class="row"><button id="createInviteBtn">Generate</button></div>
+          <div id="inviteOut" class="linkbox small">(key will appear here)</div>
         </div>
         <div class="card">
           <h4>Generate Recovery Key</h4>
@@ -289,8 +282,22 @@
           <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
           <button id="saveSettingsBtn">Save Settings</button>
         </div>
-        <div class="card"><h4>Invites</h4><div id="inviteList" class="small"></div></div>
-        <div class="card"><h4>Users (freeze/unfreeze/delete)</h4><div id="userList" class="small"></div></div>
+        <div class="card"><h4>Users (roles/freeze/delete)</h4><div id="userList" class="small"></div></div>
+        <div class="card hidden" id="channelAdminCard">
+          <h4>Channel Editor</h4>
+          <div class="row">
+            <input id="newChannelName" placeholder="channel name">
+            <select id="newChannelKind"><option value="text">text</option><option value="voice">voice</option></select>
+            <button id="addChannelBtn">Add</button>
+          </div>
+          <div id="channelAdminList" class="small"></div>
+          <div class="small" style="margin-top:.35rem">Hide/Unhide toggles are applied instantly for everyone.</div>
+        </div>
+        <div class="card">
+          <h4>Invites Export</h4>
+          <div class="small">Download a complete CSV export of invite records.</div>
+          <button id="downloadInvitesBtn" style="margin-top:.45rem">Download Invites CSV</button>
+        </div>
       </div>
     </div>
   </div>

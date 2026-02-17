@@ -4,6 +4,27 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.32] - 2026-02-17
+### Changed
+- Reordered Admin Settings cards to: Admin Mode, Create Invite Key, Generate Recovery Key, Anti-Spam/Bitrate, Users, then Invites export.
+- Replaced inline invite-history rendering with CSV export (`Download Invites CSV`) in Admin Settings.
+- Added role escalation controls for both `moderator` and `admin` in the Users section.
+
+### Fixed
+- Message moderation delete permission now accepts moderators as well as admins/primary admin.
+
+## [0.3.31] - 2026-02-17
+### Fixed
+- Added a built-in Web Audio fallback notification tone so DM/ping sounds still work even when no WAV files are present in `frontend/audio/`.
+- Notification sound playback now degrades gracefully when asset files are unavailable or blocked by browser playback behavior.
+
+## [0.3.30] - 2026-02-17
+### Changed
+- Added account-scoped notification-sound preference with a Notifications menu toggle (`Sounds: On/Off`) that persists across devices.
+
+### Fixed
+- Sound playback now respects the persisted account preference and defaults to enabled for users who have never changed the setting.
+
 ## [0.3.29] - 2026-02-17
 ### Changed
 - Added frontend sound integration for notification WAV assets under `frontend/audio/` with resilient filename fallback loading.

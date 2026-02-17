@@ -69,6 +69,9 @@ The repository contains a canonical \texttt{VERSION} file and a human-readable r
 
 \subsection{Embedded Release Changelog (Living Summary)}
 \begin{itemize}
+  \item \textbf{0.3.32}: Refined Admin Settings ordering, added invite CSV export workflow, and introduced delegated moderator/admin role toggles in user management.
+  \item \textbf{0.3.31}: Added built-in Web Audio fallback notification tone so DM/ping alerts still produce sound when WAV assets are unavailable in restricted environments.
+  \item \textbf{0.3.30}: Added account-persistent notification sound toggle in the notifications menu (default on), synchronized via backend user preferences across devices.
   \item \textbf{0.3.29}: Integrated notification WAV assets from \texttt{frontend/audio/}; incoming DM/ping notifications now play the message-received sound for immediate feedback.
   \item \textbf{0.3.28}: Added delegated admin-role toggles, persistent backend-backed DM/ping notifications with consume-on-click, non-blocking in-app confirm/prompt/toast UX, and backend-provided voice ICE configuration for stronger connectivity.
   \item \textbf{0.3.16}: Added clipboard/file image attachments + lightbox, fixed compose version warnings/runtime version source handling, and improved mobile/voice robustness.

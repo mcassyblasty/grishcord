@@ -131,7 +131,7 @@ function auth(req, res, next) {
 }
 
 async function enforceSessionVersion(req, res, next) {
-  const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color, is_admin FROM users WHERE id = $1', [req.user.sub]);
+  const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color, is_admin, is_moderator, notification_sounds_enabled FROM users WHERE id = $1', [req.user.sub]);
   const user = rows[0];
   if (!user || user.disabled || user.session_version !== req.user.sv) return res.status(401).json({ error: 'session_expired' });
   req.userDb = user;
@@ -140,6 +140,10 @@ async function enforceSessionVersion(req, res, next) {
 
 function userCanAdmin(user) {
   return Boolean(user && (user.username === ADMIN_USERNAME || user.is_admin));
+}
+
+function userCanModerate(user) {
+  return Boolean(user && (user.username === ADMIN_USERNAME || user.is_admin || user.is_moderator));
 }
 
 function adminOnly(req, res, next) {
@@ -214,7 +218,7 @@ app.post('/api/logout', async (req, res) => {
 });
 
 app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT id, username, display_name, display_color, is_admin FROM users WHERE id=$1', [req.user.sub]);
+  const { rows } = await pool.query('SELECT id, username, display_name, display_color, is_admin, is_moderator, notification_sounds_enabled FROM users WHERE id=$1', [req.user.sub]);
   const me = rows[0] || null;
   if (!me) return res.status(404).json({ error: 'not_found' });
   me.is_admin = userCanAdmin(me);
@@ -228,10 +232,26 @@ app.patch('/api/me/profile', auth, enforceSessionVersion, async (req, res) => {
   const displayColor = displayColorRaw ? displayColorRaw.toUpperCase() : null;
   if (displayColor && !/^#[0-9A-F]{6}$/i.test(displayColor)) return res.status(400).json({ error: 'invalid_color' });
   const { rows } = await pool.query(
-    'UPDATE users SET display_name = $1, display_color = $2 WHERE id = $3 RETURNING id, username, display_name, display_color',
+    'UPDATE users SET display_name = $1, display_color = $2 WHERE id = $3 RETURNING id, username, display_name, display_color, is_admin, is_moderator, notification_sounds_enabled',
     [displayName, displayColor, req.user.sub]
   );
   res.json(rows[0]);
+});
+
+
+app.patch('/api/me/preferences', auth, enforceSessionVersion, async (req, res) => {
+  if (typeof req.body.notificationSoundsEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'invalid_notification_preference' });
+  }
+  const enabled = req.body.notificationSoundsEnabled === true;
+  const { rows } = await pool.query(
+    'UPDATE users SET notification_sounds_enabled = $1 WHERE id = $2 RETURNING id, username, display_name, display_color, is_admin, is_moderator, notification_sounds_enabled',
+    [enabled, req.user.sub]
+  );
+  const me = rows[0] || null;
+  if (!me) return res.status(404).json({ error: 'not_found' });
+  me.is_admin = userCanAdmin(me);
+  res.json(me);
 });
 
 app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
@@ -298,7 +318,7 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
 
 app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
-  const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, created_at FROM users ORDER BY id ASC');
+  const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, is_moderator, created_at FROM users ORDER BY id ASC');
   const channels = await pool.query('SELECT id, name, kind, position, archived FROM channels ORDER BY kind ASC, position ASC, id ASC');
   const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2)', ['anti_spam_level', 'voice_bitrate']);
   const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
@@ -325,6 +345,25 @@ app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly
   res.json({ ok: true });
 });
 
+app.get('/api/admin/invites/export', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC');
+  const header = 'id,expires_at,created_at,used_at,revoked_at,used_by';
+  const csv = [
+    header,
+    ...rows.map((r) => [
+      r.id,
+      r.expires_at?.toISOString?.() || '',
+      r.created_at?.toISOString?.() || '',
+      r.used_at?.toISOString?.() || '',
+      r.revoked_at?.toISOString?.() || '',
+      r.used_by || ''
+    ].join(','))
+  ].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="invites-export.csv"');
+  res.send(csv);
+});
+
 app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const disabled = req.body.disabled === true;
   await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3 AND is_admin = false', [disabled, Number(req.params.id), ADMIN_USERNAME]);
@@ -340,6 +379,19 @@ app.post('/api/admin/users/:id/admin', auth, enforceSessionVersion, adminOnly, a
   if (!user) return res.status(404).json({ error: 'not_found' });
   if (user.username === ADMIN_USERNAME) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
   await pool.query('UPDATE users SET is_admin = $1 WHERE id = $2', [isAdmin, id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/roles', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const isAdmin = req.body.isAdmin === true;
+  const isModerator = req.body.isModerator === true || isAdmin;
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
+  const user = u.rows[0];
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  if (user.username === ADMIN_USERNAME && !isAdmin) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
+  await pool.query('UPDATE users SET is_admin = $1, is_moderator = $2 WHERE id = $3', [isAdmin, isModerator, id]);
   res.json({ ok: true });
 });
 
@@ -567,7 +619,7 @@ app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) =>
   const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
-  if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
+  if (Number(m.author_id) !== Number(req.user.sub) && !userCanModerate(req.userDb)) return res.status(403).json({ error: 'forbidden' });
   const r = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
   const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
