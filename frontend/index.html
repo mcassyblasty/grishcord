@@ -85,6 +85,7 @@
     .imageLightbox{position:fixed;inset:0;background:#000c;z-index:130;display:flex;align-items:center;justify-content:center;padding:1rem}
     .imageLightbox img{max-width:min(1200px,94vw);max-height:88vh;border-radius:12px;border:1px solid var(--line);background:#000}
     .stack{display:flex;flex-direction:column;gap:.5rem;margin:.75rem 0}
+    #dmSearchInput{width:100%;margin-top:.35rem;text-align:left}
     .card{border:1px solid var(--line);border-radius:8px;padding:.6rem}
     .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
     .drawerBtn{display:none}
@@ -229,7 +230,7 @@
 
       <div id="dmSections" class="hidden">
         <div class="small" style="letter-spacing:.08em;font-weight:600">DIRECT MESSAGES</div>
-        <input id="dmSearchInput" placeholder="Search DMs" aria-label="Search DMs" style="margin-top:.35rem">
+        <input id="dmSearchInput" placeholder="Search DMs" aria-label="Search DMs">
         <div class="stack" id="dmList"></div>
       </div>
     </aside>

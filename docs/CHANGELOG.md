@@ -4,6 +4,12 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.26] - 2026-02-17
+### Fixed
+- DM switch behavior on mobile now keeps the DM list open so users can choose a conversation instead of immediately collapsing the sidebar.
+- DM view now supports an explicit landing state when no DM peer is selected, with clear guidance to select a conversation before messaging.
+- Refined DM search input styling/alignment in the sidebar to ensure consistent width/text-box presentation.
+
 ## [0.3.25] - 2026-02-17
 ### Fixed
 - Stabilized inline sidebar channel administration: drag-to-reorder now uses an explicit drag handle to avoid interfering with normal channel clicks.

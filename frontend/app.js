@@ -1083,6 +1083,16 @@ function renderNavLists(){
 }
 
 
+function showDmLanding() {
+  text($('chatHeader'), 'Direct Messages');
+  $('msgs').textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  empty.textContent = 'Select a DM conversation from the left.';
+  $('msgs').appendChild(empty);
+  setComposerEnabled(false, 'Select a DM to message');
+}
+
 async function afterAuth(){
   state.me = await api('/api/me');
   text($('meLabel'), `@${state.me.username}`);
@@ -1328,16 +1338,16 @@ async function boot(){
     switchSidebarView('dms');
     setReplyTarget(null);
     state.mode = 'dm';
-    if (!state.activeDmPeerId && state.users.length) state.activeDmPeerId = state.users[0].id;
-    const active = state.users.find((u) => u.id === state.activeDmPeerId) || state.users[0];
+    renderNavLists();
+    const active = state.users.find((u) => u.id === state.activeDmPeerId);
     if (active) {
-      state.activeDmPeerId = active.id;
       text($('chatHeader'), `DM: ${active.display_name}`);
       setComposerEnabled(true);
-      renderNavLists();
       await loadMessages();
-      closeSidebarOnMobile();
+      return;
     }
+    state.activeDmPeerId = null;
+    showDmLanding();
   };
 
   $('adminModeToggle').onchange = ()=> {
