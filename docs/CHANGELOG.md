@@ -4,6 +4,24 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.23] - 2026-02-16
+### Fixed
+- Composer placeholder text is now mobile-aware: portrait/mobile views show the shorter `Plain-text message` prompt instead of desktop keyboard guidance text.
+- Composer placeholder now re-evaluates on viewport resize while remaining compatible with mode-specific placeholders (e.g., voice-disabled state).
+
+## [0.3.22] - 2026-02-16
+### Fixed
+- Portrait mobile layout was reworked for better usability: top bar now uses explicit left/right groups with improved truncation/compact controls, and the app shell uses flex-based sizing for more reliable viewport behavior.
+- Mobile sidebar overlay now anchors to the app pane in portrait instead of fixed viewport offsets, improving consistency across mobile browser chrome sizes.
+- Additional portrait-specific spacing refinements were applied to chat header/messages/composer for improved readability and interaction.
+
+## [0.3.21] - 2026-02-16
+### Fixed
+- Clicking a notification now consumes/removes that notification entry from the notifications list after navigation.
+- Mobile composer input height is now constrained to match the action-button row height for improved usability on narrow screens.
+- Top-bar mobile responsiveness improved so notification/settings controls fit better in constrained widths.
+- Voice channel section header/spacer now hide automatically when no voice channels are available.
+
 ## [0.3.20] - 2026-02-16
 ### Added
 - Added a top-right Notifications menu (next to Settings) that tracks recent DM and mention activity and supports one-click navigation to the referenced message context.

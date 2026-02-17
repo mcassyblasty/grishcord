@@ -12,7 +12,7 @@
     body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2;--danger:#f87171;--ok:#4ade80}
     *{box-sizing:border-box}
     html,body{height:100%;overflow:hidden}
-    body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text)}
+    body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100svh}
     *::-webkit-scrollbar{width:10px;height:10px}
     *::-webkit-scrollbar-track{background:transparent}
     *::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#5f6690,#3f4566);border-radius:12px;border:2px solid transparent;background-clip:padding-box}
@@ -31,10 +31,16 @@
     select option{background:var(--panel);color:var(--text)}
     .hidden{display:none!important}
     .small{font-size:.85rem;color:var(--muted)}
+    #meLabel,#versionLabel{white-space:nowrap}
     .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 
-    .top{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative;min-height:52px}
-    .spacer{flex:1}
+    .top{display:flex;justify-content:space-between;gap:.6rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative;min-height:52px}
+    .topLeft{display:flex;align-items:center;gap:.5rem;min-width:0}
+    .titleBlock{display:flex;flex-direction:column;min-width:0}
+    .titleRow{display:flex;align-items:center;gap:.45rem;min-width:0}
+    .topMeta{display:flex;gap:.35rem;min-width:0}
+    .topRight{display:flex;align-items:center;gap:.45rem;flex-shrink:0}
+    .spacer{display:none}
     .menu{position:relative}
     .notifBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 .35rem;border-radius:999px;background:var(--danger);color:#fff;font-size:.72rem;margin-left:.25rem}
     .notifList{display:flex;flex-direction:column;gap:.35rem;max-height:56vh;overflow:auto}
@@ -51,7 +57,7 @@
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
 
-    .app{display:grid;grid-template-columns:260px 1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px);min-height:0}
+    .app{display:grid;grid-template-columns:260px 1fr;min-height:0;flex:1}
     .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line);min-height:0}
     .chat{display:flex;flex-direction:column;min-height:0;overflow:hidden}
     .chatHeader{padding:.7rem 1rem;border-bottom:1px solid var(--line)}
@@ -62,7 +68,7 @@
     .meta{font-size:.8rem;color:var(--muted)}
     .empty{padding:1rem;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
     .composer{padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg);z-index:4}
-    .composer textarea{flex:1;min-height:44px;max-height:220px;resize:vertical}
+    .composer textarea{flex:1;min-height:42px;height:42px;max-height:42px;resize:none;line-height:1.25;padding:.55rem .6rem}
     .replyPreview{margin:.35rem .75rem 0;padding:.45rem .55rem;border:1px dashed var(--line);border-radius:8px;font-size:.85rem;color:var(--muted)}
     .msgTools{display:flex;gap:.2rem;position:absolute;top:.3rem;right:.3rem}
     .msgTools button{padding:.18rem .35rem;min-width:26px;min-height:24px;line-height:1;font-size:.82rem;border-radius:7px}
@@ -80,31 +86,54 @@
     .modal{width:min(720px,95vw);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
 
     @media (max-width:960px){
-      .top{padding:.4rem;gap:.35rem}
-      #settingsBtn{padding:.45rem .55rem;font-size:.88rem;white-space:nowrap}
-      .app{grid-template-columns:1fr;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
+      .top{padding:.4rem .45rem;gap:.45rem}
+      .topLeft{gap:.4rem;min-width:0;flex:1}
+      .titleRow strong{font-size:1rem;line-height:1.1}
+      .topMeta{gap:.28rem}
+      #meLabel{max-width:38vw;overflow:hidden;text-overflow:ellipsis;font-size:.78rem}
+      #versionLabel{font-size:.74rem}
+      #settingsBtn,#notifBtn{padding:.42rem .5rem;font-size:.8rem;white-space:nowrap}
+      .app{grid-template-columns:1fr}
       .sidebar{display:none}
-      .drawerBtn{display:inline-block;padding:.45rem .55rem}
-      body.showSidebar .sidebar{display:block;position:fixed;inset:52px auto 0 0;width:min(82vw,300px);z-index:60;height:calc(100dvh - 52px);height:calc(100vh - 52px)}
-      .chat{height:calc(100dvh - 52px);height:calc(100vh - 52px);min-height:0}
+      .drawerBtn{display:inline-block;padding:.42rem .5rem}
+      body.showSidebar .app{position:relative}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:0 auto 0 0;width:min(86vw,320px);z-index:60;height:100%}
+      .chat{min-height:0}
       .msgs{padding:.65rem;padding-bottom:1rem}
       .composer{padding:.55rem .55rem calc(.55rem + env(safe-area-inset-bottom));gap:.4rem}
-      .composer textarea{max-height:120px;min-height:40px}
+      .composer textarea{height:40px;min-height:40px;max-height:40px}
       .menuCard{right:0;left:auto;max-width:calc(100vw - .75rem)}
+      #notifBtn .notifText{display:none}
+      #notifBtn::before{content:"🔔"}
       .msgTools{top:.2rem;right:.2rem}
+    }
+    @media (max-width:700px) and (orientation:portrait){
+      .top{padding:.35rem .4rem;gap:.35rem}
+      .topLeft{align-items:flex-start}
+      .titleBlock{gap:.12rem}
+      .topMeta{font-size:.72rem}
+      #versionLabel{display:none}
+      #settingsBtn{font-size:.76rem;padding:.38rem .46rem}
+      #notifBtn{font-size:.76rem;padding:.38rem .46rem}
+      .chatHeader{padding:.6rem .75rem}
+      .msgs{padding:.5rem}
+      .composer{padding:.5rem .5rem calc(.5rem + env(safe-area-inset-bottom));}
     }
   </style>
 </head>
 <body>
   <div class="top">
-    <button class="drawerBtn" id="drawerBtn">☰</button>
-    <strong>Grishcord</strong>
-    <span class="small" id="meLabel">Not logged in</span>
-    <span class="small" id="versionLabel">v0.0.0</span>
-    <span class="spacer"></span>
+    <div class="topLeft">
+      <button class="drawerBtn" id="drawerBtn">☰</button>
+      <div class="titleBlock">
+        <div class="titleRow"><strong>Grishcord</strong></div>
+        <div class="topMeta"><span class="small" id="meLabel">Not logged in</span><span class="small" id="versionLabel">v0.0.0</span></div>
+      </div>
+    </div>
+    <div class="topRight">
 
     <div class="menu hidden" id="notifMenuWrap">
-      <button id="notifBtn" class="ghost">Notifications <span id="notifBadge" class="notifBadge hidden">0</span></button>
+      <button id="notifBtn" class="ghost"><span class="notifText">Notifications</span> <span id="notifBadge" class="notifBadge hidden">0</span></button>
       <div class="menuCard hidden" id="notifMenu">
         <div class="small">Recent DMs & Pings</div>
         <div id="notifList" class="notifList small"></div>
@@ -128,6 +157,7 @@
         <button id="openAdminBtn" class="hidden">Admin Settings</button>
         <button id="logoutBtn">Logout</button>
       </div>
+    </div>
     </div>
   </div>
 
@@ -184,8 +214,8 @@
       <div id="serverSections">
         <div class="small" style="letter-spacing:.08em;font-weight:600">TEXT CHANNELS</div>
         <div class="stack" id="channelList"></div>
-        <div style="height:.45rem"></div>
-        <div class="small" style="letter-spacing:.08em;font-weight:600">VOICE CHANNELS</div>
+        <div id="voiceSpacer" style="height:.45rem"></div>
+        <div id="voiceHeader" class="small" style="letter-spacing:.08em;font-weight:600">VOICE CHANNELS</div>
         <div class="stack" id="voiceList"></div>
       </div>
 
@@ -202,7 +232,7 @@
       <div id="replyPreview" class="replyPreview hidden"></div>
       <div id="pendingImage" class="pendingImage hidden"></div>
       <div id="mentionHint" class="small hidden" style="padding:0 .75rem .35rem"></div>
-      <form id="composerForm" class="composer"><button id="attachBtn" type="button" title="Double-click to select image">+</button><input id="attachFile" type="file" accept="image/*" class="hidden"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message (Enter to send, Shift+Enter for new line)"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
+      <form id="composerForm" class="composer"><button id="attachBtn" type="button" title="Double-click to select image">+</button><input id="attachFile" type="file" accept="image/*" class="hidden"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
     </main>
   </div>
 

@@ -415,6 +415,8 @@ function focusMessageById(messageId) {
 
 async function openNotification(n) {
   $('notifMenu').classList.add('hidden');
+  state.notifications = state.notifications.filter((x) => Number(x.id) !== Number(n.id));
+  renderNotifications();
   setReplyTarget(null);
   if (n.mode === 'dm' && n.dmPeerId) {
     switchSidebarView('dms');
@@ -541,10 +543,14 @@ function setSpamEffective(level){
   text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
 }
 
-function setComposerEnabled(enabled, placeholder = 'Plain-text message (Enter to send, Shift+Enter for new line)') {
+function defaultComposerPlaceholder() {
+  return window.innerWidth <= 960 ? 'Plain-text message' : 'Plain-text message (Enter to send, Shift+Enter for new line)';
+}
+
+function setComposerEnabled(enabled, placeholder = null) {
   $('msgInput').disabled = !enabled;
   $('sendBtn').disabled = !enabled;
-  $('msgInput').placeholder = placeholder;
+  $('msgInput').placeholder = placeholder ?? defaultComposerPlaceholder();
 }
 
 async function refreshAdmin(){
@@ -868,7 +874,10 @@ function renderNavLists(){
   }
 
   const vl = $('voiceList'); vl.textContent='';
-  for (const c of state.channels.filter((x) => x.kind === 'voice')) {
+  const voiceChannels = state.channels.filter((x) => x.kind === 'voice');
+  $('voiceHeader')?.classList.toggle('hidden', voiceChannels.length === 0);
+  $('voiceSpacer')?.classList.toggle('hidden', voiceChannels.length === 0);
+  for (const c of voiceChannels) {
     const b = document.createElement('button');
     const activeVoice = state.voice.room === c.name;
     b.className = `channel ${activeVoice ? 'active' : ''}`;
@@ -1037,6 +1046,11 @@ async function boot(){
     if (!$('settingsMenuWrap').contains(e.target)) $('settingsMenu').classList.add('hidden');
     if (!$('notifMenuWrap').contains(e.target)) $('notifMenu').classList.add('hidden');
     closeSidebarIfMobileOutsideClick(e);
+  });
+
+  window.addEventListener('resize', () => {
+    if ($('msgInput').disabled) return;
+    $('msgInput').placeholder = defaultComposerPlaceholder();
   });
 
   $('accountDisplayColor').addEventListener('input', ()=> {
