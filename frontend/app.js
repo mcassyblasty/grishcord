@@ -931,6 +931,9 @@ function renderNavLists(){
     row.dataset.channelId = String(c.id);
     row.draggable = canAdmin;
 
+function renderNavLists(){
+  const cl = $('channelList'); cl.textContent='';
+  for (const c of state.channels.filter((x) => x.kind !== 'voice')){
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='channel' && state.activeChannelId===c.id ? 'active':''}`;
     b.textContent = `# ${c.name}`;
@@ -983,6 +986,7 @@ function renderNavLists(){
     }
 
     cl.appendChild(row);
+    cl.appendChild(b);
   }
 
   const vl = $('voiceList'); vl.textContent='';
@@ -1038,6 +1042,7 @@ function renderNavLists(){
     }
 
     vl.appendChild(row);
+    vl.appendChild(b);
   }
 
   const dl = $('dmList'); dl.textContent='';
