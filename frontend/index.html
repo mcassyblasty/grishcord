@@ -29,7 +29,7 @@
     .sectionHead{display:flex;align-items:center;justify-content:space-between;gap:.35rem}
     .sectionHead .small{font-weight:600;letter-spacing:.08em}
     .sectionAddBtn,.chanMenuBtn,.chanDragHandle{padding:.18rem .45rem;min-width:28px;min-height:26px;line-height:1;border-radius:7px}
-    .chanRow{display:flex;align-items:center;gap:.3rem}
+    .chanRow{display:flex;align-items:center;gap:.3rem;position:relative}
     .chanRow .channel{flex:1}
     .chanRow.dragging{opacity:.55}
     .chanRow.dropTarget{outline:1px dashed var(--accent);border-radius:8px}
@@ -40,6 +40,9 @@
     .small{font-size:.85rem;color:var(--muted)}
     #meLabel,#versionLabel{white-space:nowrap}
     .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .adminUserRow{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--line);border-radius:10px;margin-bottom:.45rem}
+    .adminUserMeta{font-weight:600;line-height:1.3;min-width:0;word-break:break-word}
+    .adminUserActions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}
 
     .top{display:flex;justify-content:space-between;gap:.6rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative;min-height:52px}
     .topLeft{display:flex;align-items:center;gap:.5rem;min-width:0}
@@ -280,9 +283,10 @@
           <div class="row"><label>Level</label><select id="spamLevel"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
           <div class="small" id="spamEffective"></div>
           <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
+          <div class="row"><label><input id="voiceEnabled" type="checkbox" checked> Enable voice channels</label></div>
           <button id="saveSettingsBtn">Save Settings</button>
         </div>
-        <div class="card"><h4>Users (roles/freeze/delete)</h4><div id="userList" class="small"></div></div>
+        <div class="card"><h4>Users (admin/freeze/delete)</h4><div id="userList" class="small"></div></div>
         <div class="card hidden" id="channelAdminCard">
           <h4>Channel Editor</h4>
           <div class="row">

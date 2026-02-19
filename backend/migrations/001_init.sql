@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 INSERT INTO app_settings(key, value)
-VALUES ('anti_spam_level', '5'::jsonb), ('voice_bitrate', '32000'::jsonb)
+VALUES ('anti_spam_level', '5'::jsonb), ('voice_bitrate', '32000'::jsonb), ('voice_enabled', 'true'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   session_version integer NOT NULL DEFAULT 1,
   disabled boolean NOT NULL DEFAULT false,
   is_admin boolean NOT NULL DEFAULT false,
-  is_moderator boolean NOT NULL DEFAULT false,
+
   notification_sounds_enabled boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS messages (
   reply_to bigint REFERENCES messages(id) ON DELETE SET NULL,
   body text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
+  edited_at timestamptz,
   CHECK (char_length(body) <= 10000)
 );
 
@@ -102,4 +103,5 @@ ON notifications(user_id, message_id, kind);
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_sounds_enabled boolean NOT NULL DEFAULT true;
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_moderator boolean NOT NULL DEFAULT false;
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;

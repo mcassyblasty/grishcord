@@ -4,6 +4,34 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.36] - 2026-02-17
+### Security
+- Added authentication endpoint rate limiting for login, registration, and recovery redeem/reset flows, returning HTTP 429 with `Retry-After`.
+- Replaced permissive CORS reflection with allowlist-based origin validation (`CORS_ORIGINS`, plus `PUBLIC_BASE_URL` origin).
+- Added same-origin enforcement for state-changing API requests (`POST/PATCH/PUT/DELETE`) using Origin/Referer host checks to reduce CSRF risk.
+
+## [0.3.35] - 2026-02-17
+### Fixed
+- Replying to a message now behaves like a ping for the replied user: reply targets receive persistent notifications and incoming reply messages are visually highlighted like mentions.
+- Reply-triggered notifications now participate in existing notification-sound playback, so replied users hear the same alert used for pings/DMs.
+
+## [0.3.34] - 2026-02-17
+### Changed
+- Simplified delegated roles back to admin-only controls in Admin Settings: removed moderator role toggles and role API usage from the Users panel.
+- Added a global `Enable voice channels` admin setting and wired channel loading to hide all voice channels when disabled.
+- Improved Admin Users layout and channel action-menu anchoring/alignment to reduce UI chaos and make three-dot channel actions reliably clickable.
+
+### Fixed
+- Message edits now persist and display an `(edited)` marker, including after reloads.
+- Channel/message moderation checks now align with admin-only permissions (plus immutable primary admin) instead of moderator delegation.
+
+## [0.3.33] - 2026-02-17
+### Changed
+- Removed `scripts/fix_everything.sh` and replaced operations flow with a new verbose `scripts/grishcordctl.sh` command interface.
+- Added `grishcordctl` commands: `start`, `stop`, `update-start`, `status`, and `logs`.
+- `grishcordctl` now prints continuous elapsed-time progress during long-running operations and service readiness waits to avoid appearing frozen.
+- `scripts/run_grishcord.sh` is now a compatibility wrapper that delegates to `grishcordctl start`.
+
 ## [0.3.32] - 2026-02-17
 ### Changed
 - Reordered Admin Settings cards to: Admin Mode, Create Invite Key, Generate Recovery Key, Anti-Spam/Bitrate, Users, then Invites export.

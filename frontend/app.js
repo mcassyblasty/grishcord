@@ -288,10 +288,11 @@ function renderMessage(m){
   const wrap = document.createElement('div'); wrap.className='msg';
   wrap.dataset.messageId = String(m.id);
   const meta = document.createElement('div'); meta.className='meta';
-  meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}`;
+  const editedLabel = m.edited_at ? ' (edited)' : '';
+  meta.textContent = `${m.display_name || m.username || 'user'} · ${fmtTs(m.created_at)}${editedLabel}`;
   if (m.display_color) meta.style.color = m.display_color;
   const body = document.createElement('div');
-  if (messageMentionsMe(m.body)) wrap.classList.add('mentionPing');
+  if (messageMentionsMe(m.body) || Number(m.reply_author_id) === Number(state.me?.id)) wrap.classList.add('mentionPing');
   body.style.whiteSpace = 'pre-wrap';
   body.style.wordBreak = 'break-word';
   const full = m.body || '';
@@ -727,6 +728,8 @@ function connectWs(){
     if (msg.type === 'message_edited' && msg.data?.id) {
       const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
       if (n) {
+        const meta = n.querySelector('.meta');
+        if (meta && !meta.textContent.includes('(edited)')) meta.textContent = `${meta.textContent} (edited)`;
         const bodies = [...n.children].filter((el) => el.tagName === 'DIV' && !el.classList.contains('meta') && !el.classList.contains('small') && !el.classList.contains('msgTools'));
         const body = bodies[bodies.length - 1];
         if (body) body.textContent = msg.data.body || '';
@@ -802,47 +805,38 @@ async function refreshAdmin(){
   state.allChannels = s.channels || [];
   $('spamLevel').value = String(s.antiSpamLevel);
   $('voiceBitrate').value = String(s.voiceBitrate);
+  $('voiceEnabled').checked = s.voiceEnabled !== false;
   setSpamEffective(Number(s.antiSpamLevel));
   // Invite list is no longer rendered inline; CSV export is available instead.
 
   const userList = $('userList'); userList.textContent='';
   for(const u of s.users){
-    const row = document.createElement('div'); row.className='row';
-    const label = document.createElement('span'); label.textContent = `${u.username} (${u.display_name}) ${u.disabled ? '[frozen]' : ''}`;
-    row.appendChild(label);
+    const row = document.createElement('div');
+    row.className='adminUserRow';
+    const meta = document.createElement('div');
+    meta.className = 'adminUserMeta';
+    meta.textContent = `${u.display_name || u.username} (@${u.username})${u.disabled ? ' • frozen' : ''}`;
+    row.appendChild(meta);
     if (u.username !== 'mcassyblasty') {
-      const modLabel = document.createElement('label');
-      modLabel.className = 'small';
-      const modCheck = document.createElement('input');
-      modCheck.type = 'checkbox';
-      modCheck.checked = u.is_moderator === true;
+      const actions = document.createElement('div');
+      actions.className = 'adminUserActions';
 
       const adminLabel = document.createElement('label');
       adminLabel.className = 'small';
       const adminCheck = document.createElement('input');
       adminCheck.type = 'checkbox';
       adminCheck.checked = u.is_admin === true;
-
-      const saveRoles = async () => {
+      adminCheck.onchange = async () => {
         try {
-          await api(`/api/admin/users/${u.id}/roles`, 'POST', { isModerator: modCheck.checked, isAdmin: adminCheck.checked });
+          await api(`/api/admin/users/${u.id}/admin`, 'POST', { isAdmin: adminCheck.checked });
           await refreshAdmin();
         } catch (err) {
-          showError(`Role update failed: ${humanError(err)}`);
+          showError(`Admin update failed: ${humanError(err)}`);
           await refreshAdmin();
         }
       };
-      modCheck.onchange = async () => {
-        if (adminCheck.checked && !modCheck.checked) adminCheck.checked = false;
-        await saveRoles();
-      };
-      adminCheck.onchange = async () => {
-        if (adminCheck.checked) modCheck.checked = true;
-        await saveRoles();
-      };
-      modLabel.append(modCheck, document.createTextNode(' moderator'));
       adminLabel.append(adminCheck, document.createTextNode(' admin'));
-      row.append(modLabel, adminLabel);
+      actions.append(adminLabel);
 
       const btn = document.createElement('button');
       btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
@@ -877,8 +871,8 @@ async function refreshAdmin(){
         checkbox.type = 'checkbox';
         checkRow.append(checkbox, document.createTextNode(' I understand this permanently deletes this user account and related messages/uploads.'));
 
-        const actions = document.createElement('div');
-        actions.className = 'row';
+        const actionsRow = document.createElement('div');
+        actionsRow.className = 'row';
         const confirm = document.createElement('button');
         confirm.textContent = 'Confirm Delete';
         confirm.onclick = async()=>{
@@ -909,13 +903,14 @@ async function refreshAdmin(){
         const cancel = document.createElement('button');
         cancel.textContent = 'Cancel';
         cancel.onclick = ()=> verify.remove();
-        actions.append(confirm, cancel);
+        actionsRow.append(confirm, cancel);
 
-        verify.append(hint, input, checkRow, actions);
+        verify.append(hint, input, checkRow, actionsRow);
         row.appendChild(verify);
       };
 
-      row.append(btn, delBtn);
+      actions.append(btn, delBtn);
+      row.append(actions);
     }
     userList.appendChild(row);
   }
@@ -1135,8 +1130,8 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
   closeAnyChannelMenus();
   const menu = document.createElement('div');
   menu.className = 'menuCard channelActionsMenu';
-  menu.style.right = '2rem';
-  menu.style.top = 'calc(100% - .2rem)';
+  menu.style.right = '.25rem';
+  menu.style.top = 'calc(100% + .2rem)';
   const rename = document.createElement('button');
   rename.textContent = 'Rename';
   rename.onclick = async () => {
@@ -1163,7 +1158,8 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
     await onDone();
   };
   menu.append(rename, toggle, archive);
-  anchorBtn.parentElement.appendChild(menu);
+  const row = anchorBtn.closest('.chanRow');
+  row?.appendChild(menu);
 }
 
 async function persistChannelOrder(kind, container) {
@@ -1783,8 +1779,9 @@ async function boot(){
   $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
   $('saveSettingsBtn').onclick = async()=>{
     try {
-      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value)});
+      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value),voiceEnabled:$('voiceEnabled').checked});
       setSpamEffective(Number(r.antiSpamLevel));
+      await refreshChannels();
     } catch(err){ showError(`Settings save failed: ${humanError(err)}`); }
   };
 

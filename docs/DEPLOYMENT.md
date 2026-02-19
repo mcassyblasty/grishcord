@@ -7,13 +7,13 @@
 ## Fastest reliable path
 From repository root:
 ```bash
-./scripts/fix_everything.sh
+./scripts/grishcordctl.sh start
 ```
-This script installs missing prerequisites, validates `/mnt/grishcord` mount, creates required subdirectories, and starts the stack with deterministic compose naming (`-p grishcord`).
+This command starts the stack using deterministic compose naming (`-p grishcord`) with verbose progress and readiness timers. Ensure Docker/Compose and `/mnt/grishcord` are already set up.
 
 ## Normal start
 ```bash
-./scripts/run_grishcord.sh
+./scripts/grishcordctl.sh start
 ```
 
 ## Manual compose commands (deterministic naming)
@@ -31,7 +31,7 @@ All persistent data is under `/mnt/grishcord` via bind mounts:
 ## Update
 ```bash
 # after replacing repository files with a new release
-./scripts/fix_everything.sh
+./scripts/grishcordctl.sh update-start
 ```
 
 ## Storage-full policy
