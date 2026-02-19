@@ -1,0 +1,61 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\title{Grishcord Operations Guide}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section{Purpose}
+This guide explains deterministic local/LAN lifecycle operations for Grishcord on Debian with Docker Compose using the `grishcordctl` command wrapper.
+
+\section{Start}
+Run from repository root:
+\begin{verbatim}
+./scripts/grishcordctl.sh start
+\end{verbatim}
+The command performs a deterministic detached compose start (`-p grishcord`) and continuously prints elapsed-time progress while waiting for service readiness so it never appears frozen.
+
+\section{Update + start}
+\begin{verbatim}
+./scripts/grishcordctl.sh update-start
+\end{verbatim}
+The command starts/restarts in detached mode and prints the exact URL:
+\begin{verbatim}
+Open: http://<vm-ip>:<port>/
+\end{verbatim}
+
+\section{Verification commands}
+\begin{verbatim}
+docker compose -p grishcord -f docker-compose.yml ps
+docker compose -p grishcord -f docker-compose.yml logs --tail 200 caddy frontend backend
+\end{verbatim}
+
+\section{How LAN URL is determined}
+Scripts resolve:
+\begin{enumerate}
+  \item VM IP using \texttt{hostname -I} (first address),
+  \item Caddy host port via \texttt{docker compose -p grishcord port caddy 80}.
+\end{enumerate}
+Printed URL format is always:
+\begin{verbatim}
+http://<vm-ip>:<caddy-port>/
+\end{verbatim}
+
+\section{Versioning and release history}
+Use the top-level \texttt{VERSION} file as the canonical deployed version identifier.\\
+Track release notes in \texttt{docs/CHANGELOG.md}.\\
+Runtime API check:
+\begin{verbatim}
+curl -s http://<vm-ip>:<port>/api/version
+\end{verbatim}
+
+\section{Common failure modes and exact fixes}
+\begin{itemize}
+  \item \textbf{Docker missing}: install Docker Engine + Compose plugin first, then run \texttt{./scripts/grishcordctl.sh start}.
+  \item \textbf{/mnt/grishcord not mounted}: mount storage properly and ensure compose bind mounts resolve, then rerun \texttt{./scripts/grishcordctl.sh start}.
+  \item \textbf{Compose project name confusion (e.g., symlink ``current'')}: scripts force \texttt{-p grishcord} and explicitly tear down legacy \texttt{current} safely (no persistent data deletion).
+  \item \textbf{Service not reachable}: check \texttt{ps} and then inspect logs using the commands above.
+\end{itemize}
+
+\end{document}
