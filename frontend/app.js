@@ -215,12 +215,14 @@ function messageAuthorLabel(m) {
   return m.display_name || m.username || 'user';
 }
 
-function setReplyTarget(m) {
+function setReplyTarget(m, opts = {}) {
+  const focusComposerOnClear = opts.focusComposerOnClear === true;
   state.replyTo = m ? { id: m.id, body: m.body || '', author: messageAuthorLabel(m) } : null;
   const box = $('replyPreview');
   if (!state.replyTo) {
     box.classList.add('hidden');
     box.textContent = '';
+    if (focusComposerOnClear) focusComposer();
     return;
   }
   box.classList.remove('hidden');
@@ -228,8 +230,49 @@ function setReplyTarget(m) {
   const cancel = document.createElement('button');
   cancel.textContent = '×';
   cancel.style.marginLeft = '.5rem';
-  cancel.onclick = () => setReplyTarget(null);
+  cancel.onclick = () => setReplyTarget(null, { focusComposerOnClear: true });
   box.appendChild(cancel);
+}
+
+function renderMessageUploads(wrap, uploads = []) {
+  for (const old of wrap.querySelectorAll('.msgUploads')) old.remove();
+  if (!Array.isArray(uploads) || !uploads.length) return;
+  const imgWrap = document.createElement('div');
+  imgWrap.className = 'msgUploads';
+  const fileWrap = document.createElement('div');
+  fileWrap.className = 'row';
+  for (const up of uploads) {
+    const ct = String(up.content_type || '');
+    if (ct.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.className = 'msgImage';
+      img.src = up.url;
+      img.alt = 'Uploaded image';
+      img.loading = 'lazy';
+      img.onclick = () => openLightbox(up.url);
+      imgWrap.appendChild(img);
+      continue;
+    }
+    const fileLink = document.createElement('a');
+    fileLink.href = up.url;
+    fileLink.target = '_blank';
+    fileLink.rel = 'noopener noreferrer';
+    fileLink.textContent = `Attachment #${up.id}`;
+    fileLink.className = 'small';
+    fileWrap.appendChild(fileLink);
+  }
+  if (imgWrap.children.length) wrap.appendChild(imgWrap);
+  if (fileWrap.children.length) wrap.appendChild(fileWrap);
+}
+
+function isAllowedAttachment(file) {
+  if (!file) return false;
+  const type = String(file.type || '').toLowerCase();
+  const name = String(file.name || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  if (type === 'application/zip') return true;
+  if (name.endsWith('.zip')) return true;
+  return false;
 }
 
 function clearPendingImage() {
@@ -248,20 +291,24 @@ function setPendingImage(file) {
   if (!file) return clearPendingImage();
   clearPendingImage();
   state.pendingImageFile = file;
-  state.pendingImagePreviewUrl = URL.createObjectURL(file);
+  const isImage = String(file.type || '').toLowerCase().startsWith('image/');
+  if (isImage) state.pendingImagePreviewUrl = URL.createObjectURL(file);
   const box = $('pendingImage');
   box.classList.remove('hidden');
-  const img = document.createElement('img');
-  img.src = state.pendingImagePreviewUrl;
-  img.alt = 'Pending image';
+  if (isImage) {
+    const img = document.createElement('img');
+    img.src = state.pendingImagePreviewUrl;
+    img.alt = 'Pending image';
+    box.appendChild(img);
+  }
   const meta = document.createElement('div');
   meta.className = 'small';
-  meta.textContent = `${file.name || 'clipboard-image'} (${Math.round(file.size / 1024)} KB)`;
+  meta.textContent = `${file.name || 'attachment'} (${Math.round(file.size / 1024)} KB)`;
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.textContent = 'Remove';
   remove.onclick = clearPendingImage;
-  box.append(img, meta, remove);
+  box.append(meta, remove);
 }
 
 function openLightbox(url) {
@@ -314,21 +361,7 @@ function renderMessage(m){
     b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
     wrap.appendChild(b);
   }
-  if (Array.isArray(m.uploads) && m.uploads.length) {
-    const imgWrap = document.createElement('div');
-    for (const up of m.uploads) {
-      const ct = String(up.content_type || '');
-      if (!ct.startsWith('image/')) continue;
-      const img = document.createElement('img');
-      img.className = 'msgImage';
-      img.src = up.url;
-      img.alt = 'Uploaded image';
-      img.loading = 'lazy';
-      img.onclick = () => openLightbox(up.url);
-      imgWrap.appendChild(img);
-    }
-    if (imgWrap.children.length) wrap.appendChild(imgWrap);
-  }
+  renderMessageUploads(wrap, m.uploads);
   const tools = document.createElement('div');
   tools.className = 'msgTools';
 
@@ -359,6 +392,62 @@ function renderMessage(m){
       ta.style.resize = 'vertical';
       const actions = document.createElement('div');
       actions.className = 'row';
+      const uploadEditor = document.createElement('div');
+      uploadEditor.className = 'row';
+      uploadEditor.style.marginTop = '.4rem';
+
+      const selectedUploads = Array.isArray(m.uploads) ? m.uploads.map((u) => ({ ...u })) : [];
+      const pendingFiles = [];
+      const uploadChips = document.createElement('div');
+      uploadChips.className = 'row';
+
+      const redrawUploadChips = () => {
+        uploadChips.textContent = '';
+        for (const up of selectedUploads) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'ghost';
+          chip.textContent = `Attached #${up.id} ×`;
+          chip.onclick = () => {
+            const idx = selectedUploads.findIndex((x) => Number(x.id) === Number(up.id));
+            if (idx >= 0) selectedUploads.splice(idx, 1);
+            redrawUploadChips();
+          };
+          uploadChips.appendChild(chip);
+        }
+        for (const file of pendingFiles) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'ghost';
+          chip.textContent = `${file.name || 'new-image'} ×`;
+          chip.onclick = () => {
+            const idx = pendingFiles.indexOf(file);
+            if (idx >= 0) pendingFiles.splice(idx, 1);
+            redrawUploadChips();
+          };
+          uploadChips.appendChild(chip);
+        }
+      };
+
+      const addUploadBtn = document.createElement('button');
+      addUploadBtn.type = 'button';
+      addUploadBtn.className = 'ghost';
+      addUploadBtn.textContent = 'Add image';
+      const addUploadInput = document.createElement('input');
+      addUploadInput.type = 'file';
+      addUploadInput.accept = 'image/*';
+      addUploadInput.multiple = true;
+      addUploadInput.className = 'hidden';
+      addUploadBtn.onclick = () => addUploadInput.click();
+      addUploadInput.onchange = () => {
+        for (const file of Array.from(addUploadInput.files || [])) {
+          if (!String(file.type || '').startsWith('image/')) continue;
+          pendingFiles.push(file);
+        }
+        addUploadInput.value = '';
+        redrawUploadChips();
+      };
+
       const saveBtn = document.createElement('button');
       saveBtn.textContent = 'Save';
       saveBtn.className = 'primary';
@@ -369,15 +458,23 @@ function renderMessage(m){
       const restore = () => {
         editWrap.remove();
         body.classList.remove('hidden');
+        focusComposer();
       };
 
       const submitEdit = async () => {
         const next = ta.value;
         if (!next.trim()) return;
         try {
-          const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next });
+          const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
+          for (const file of pendingFiles) {
+            const up = await uploadImageFile(file);
+            if (up.uploadId) uploadIds.push(Number(up.uploadId));
+          }
+          const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next, uploadIds });
           m.body = r.body || next;
+          m.uploads = Array.isArray(r.uploads) ? r.uploads : [];
           body.textContent = m.body;
+          renderMessageUploads(wrap, m.uploads);
           restore();
         } catch (err) {
           showError(`Edit failed: ${humanError(err)}`);
@@ -397,8 +494,10 @@ function renderMessage(m){
         }
       });
 
+      uploadEditor.append(addUploadBtn, addUploadInput);
+      redrawUploadChips();
       actions.append(saveBtn, cancelBtn);
-      editWrap.append(ta, actions);
+      editWrap.append(ta, uploadEditor, uploadChips, actions);
       body.classList.add('hidden');
       wrap.insertBefore(editWrap, tools);
       ta.focus();
@@ -733,6 +832,7 @@ function connectWs(){
         const bodies = [...n.children].filter((el) => el.tagName === 'DIV' && !el.classList.contains('meta') && !el.classList.contains('small') && !el.classList.contains('msgTools'));
         const body = bodies[bodies.length - 1];
         if (body) body.textContent = msg.data.body || '';
+        if (Array.isArray(msg.data.uploads)) renderMessageUploads(n, msg.data.uploads);
       }
     }
     if (msg.type === 'message' && msg.data?.dm_peer_id) {
@@ -1585,8 +1685,8 @@ async function boot(){
   $('attachFile').onchange = ()=> {
     const file = $('attachFile').files?.[0];
     if (!file) return;
-    if (!String(file.type || '').startsWith('image/')) {
-      showError('Please choose an image file.');
+    if (!isAllowedAttachment(file)) {
+      showError('Please choose an image or .zip file.');
       return;
     }
     setPendingImage(file);

@@ -4,6 +4,20 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.43] - 2026-02-25
+### Changed
+- Added support for `.zip` file uploads up to 100MB (`MAX_UPLOAD_BYTES`), alongside existing image attachments.
+- Composer attachment picker now accepts image files and `.zip` files.
+- Message rendering now shows non-image attachments as downloadable links.
+
+## [0.3.42] - 2026-02-25
+### Changed
+- Message edit flow now supports attachment management: users can remove already attached images and add new images while editing, then save all changes together.
+
+### Fixed
+- Exiting the reply banner via its cancel button now returns input focus to the bottom composer.
+- Exiting message edit mode (Save/Cancel/Escape) now returns focus to the bottom composer for faster follow-up sending.
+
 ## [0.3.41] - 2026-02-25
 ### Fixed
 - Prevented Compose backend startup misconfiguration by defaulting backend `DATABASE_URL` to use service host `postgres` when the env var is unset.

@@ -47,7 +47,7 @@ await fsp.mkdir(uploadsDir, { recursive: true });
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'mcassyblasty';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
-const MAX_IMAGE_BYTES = Number(process.env.MAX_IMAGE_BYTES || 15 * 1024 * 1024);
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 100 * 1024 * 1024);
 const RETENTION_THRESHOLD = Number(process.env.RETENTION_THRESHOLD_PCT || 90);
 const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS || 120000);
 const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || '/mnt/grishcord';
@@ -152,7 +152,7 @@ function authRateLimit({ windowMs, max, blockMs, bucket }) {
   };
 }
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES } });
 const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
 const token = (n = 32) => crypto.randomBytes(n).toString('hex');
 
@@ -701,16 +701,43 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
 app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
   const id = Number(req.params.id);
   const body = String(req.body.body || '').slice(0, 10000);
+  const ids = Array.isArray(req.body.uploadIds)
+    ? [...new Set(req.body.uploadIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))].slice(0, 8)
+    : null;
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
-  if (!body.trim()) return res.status(400).json({ error: 'empty_body' });
+  if (!body.trim() && (!ids || ids.length === 0)) return res.status(400).json({ error: 'empty_body' });
   const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
   if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
+
+  if (ids) {
+    const validUploads = await pool.query('SELECT id FROM uploads WHERE id = ANY($1::bigint[]) AND owner_id = $2', [ids, req.user.sub]);
+    const validIds = validUploads.rows.map((r) => Number(r.id));
+    await pool.query('DELETE FROM message_uploads WHERE message_id = $1', [id]);
+    for (const uploadId of validIds) {
+      await pool.query('INSERT INTO message_uploads(message_id, upload_id) VALUES($1, $2) ON CONFLICT DO NOTHING', [id, uploadId]);
+    }
+  }
+
   const r = await pool.query('UPDATE messages SET body = $1, edited_at = now() WHERE id = $2 RETURNING id, edited_at', [body, id]);
-  const payload = JSON.stringify({ type: 'message_edited', data: { id: r.rows[0].id, body, edited_at: r.rows[0].edited_at } });
+  const uploads = await pool.query('SELECT u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = $1 ORDER BY u.id ASC', [id]);
+  const payload = JSON.stringify({
+    type: 'message_edited',
+    data: {
+      id: r.rows[0].id,
+      body,
+      edited_at: r.rows[0].edited_at,
+      uploads: uploads.rows.map((u) => ({ id: u.id, content_type: u.content_type, url: `/api/uploads/${u.id}` }))
+    }
+  });
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
-  res.json({ ok: true, id, body });
+  res.json({
+    ok: true,
+    id,
+    body,
+    uploads: uploads.rows.map((u) => ({ id: u.id, content_type: u.content_type, url: `/api/uploads/${u.id}` }))
+  });
 });
 
 app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
@@ -782,13 +809,15 @@ app.post('/api/upload-image', auth, enforceSessionVersion, upload.single('image'
   if (!req.file) return res.status(400).json({ error: 'missing_file' });
   const ft = await fileTypeFromBuffer(req.file.buffer);
   const allowed = new Map([
-    ['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/gif', 'gif'], ['image/webp', 'webp']
+    ['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/gif', 'gif'], ['image/webp', 'webp'], ['application/zip', 'zip']
   ]);
-  if (!ft || !allowed.has(ft.mime)) return res.status(400).json({ error: 'unsupported_image' });
+  const fallbackZip = String(req.file.originalname || '').toLowerCase().endsWith('.zip') ? { mime: 'application/zip', ext: 'zip' } : null;
+  const detected = ft || fallbackZip;
+  if (!detected || !allowed.has(detected.mime)) return res.status(400).json({ error: 'unsupported_upload_type' });
   const id = uuidv4();
-  const filePath = path.join(uploadsDir, `${id}.${allowed.get(ft.mime)}`);
+  const filePath = path.join(uploadsDir, `${id}.${allowed.get(detected.mime)}`);
   await fsp.writeFile(filePath, req.file.buffer);
-  const r = await pool.query('INSERT INTO uploads(storage_name, content_type, byte_size, owner_id) VALUES($1,$2,$3,$4) RETURNING id', [path.basename(filePath), ft.mime, req.file.size, req.user.sub]);
+  const r = await pool.query('INSERT INTO uploads(storage_name, content_type, byte_size, owner_id) VALUES($1,$2,$3,$4) RETURNING id', [path.basename(filePath), detected.mime, req.file.size, req.user.sub]);
   res.json({ uploadId: r.rows[0].id });
 });
 

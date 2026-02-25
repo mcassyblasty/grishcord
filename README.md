@@ -40,3 +40,8 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ## Compose database host note
 - In Docker Compose, `DATABASE_URL` must target the service hostname `postgres` (not `localhost` / `127.0.0.1`).
+
+
+## Upload limits
+- Supports image attachments and `.zip` attachments.
+- Default backend upload cap is 100MB via `MAX_UPLOAD_BYTES` in `.env`.
