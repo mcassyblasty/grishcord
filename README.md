@@ -2,6 +2,10 @@
 
 Minimal private Discord-like web app scaffold with Docker Compose, Postgres, LiveKit, and coturn.
 
+## Install helper
+- `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
+- If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
+
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
 - `./scripts/grishcordctl.sh restart` (fast service restart + readiness waits)

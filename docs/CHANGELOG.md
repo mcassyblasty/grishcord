@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.40] - 2026-02-25
+### Changed
+- Added a top-level interactive installer script `install_grishcord.sh` that can run from anywhere and supports install via `git`, `wget`, or `curl`.
+- If `git` is chosen and git identity is missing, the installer now prompts through configuring global git `user.name` and `user.email`.
+
 ## [0.3.39] - 2026-02-25
 ### Changed
 - Improved `grishcordctl` lifecycle efficiency and reliability with optional Compose `--wait` support, terminal-state detection during readiness polling, and post-start HTTP endpoint verification.
