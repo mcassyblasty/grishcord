@@ -1174,11 +1174,13 @@ async function persistChannelOrder(kind, container) {
 
 function renderNavLists(){
   const canAdmin = canInlineChannelAdmin();
+  const showAllChannelsInAdmin = canAdmin;
+  const navChannels = showAllChannelsInAdmin && state.allChannels.length ? state.allChannels : state.channels;
   $('addTextChannelBtn')?.classList.toggle('hidden', !canAdmin);
   $('addVoiceChannelBtn')?.classList.toggle('hidden', !canAdmin);
 
   const cl = $('channelList'); cl.textContent='';
-  const textChannels = state.channels.filter((x) => x.kind !== 'voice');
+  const textChannels = navChannels.filter((x) => x.kind !== 'voice');
   for (const c of textChannels){
     const row = document.createElement('div');
     row.className = 'chanRow';
@@ -1187,7 +1189,8 @@ function renderNavLists(){
 
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='channel' && state.activeChannelId===c.id ? 'active':''}`;
-    b.textContent = `# ${c.name}`;
+    b.textContent = `# ${c.name}${c.archived ? ' (off)' : ''}`;
+    if (c.archived) b.style.opacity = '0.72';
     b.onclick = async()=>{
       state.mode='channel';
       setReplyTarget(null);
@@ -1204,6 +1207,23 @@ function renderNavLists(){
     row.appendChild(b);
 
     if (canAdmin) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'ghost chanToggleBtn';
+      toggleBtn.textContent = c.archived ? 'Off' : 'On';
+      toggleBtn.title = 'Toggle channel visibility';
+      toggleBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await api(`/api/admin/channels/${c.id}`, 'PATCH', { archived: !c.archived });
+          await refreshAdmin();
+          await refreshChannels();
+          renderNavLists();
+        } catch (err) {
+          showError(`Channel toggle failed: ${humanError(err)}`);
+        }
+      };
+      row.appendChild(toggleBtn);
+
       const dragBtn = document.createElement('button');
       dragBtn.className = 'ghost chanDragHandle';
       dragBtn.textContent = '↕';
@@ -1248,7 +1268,7 @@ function renderNavLists(){
   }
 
   const vl = $('voiceList'); vl.textContent='';
-  const voiceChannels = state.channels.filter((x) => x.kind === 'voice');
+  const voiceChannels = navChannels.filter((x) => x.kind === 'voice');
   $('voiceHeader')?.classList.toggle('hidden', voiceChannels.length === 0);
   $('voiceSpacer')?.classList.toggle('hidden', voiceChannels.length === 0);
   for (const c of voiceChannels) {
@@ -1260,12 +1280,33 @@ function renderNavLists(){
     const b = document.createElement('button');
     const activeVoice = state.voice.room === c.name;
     b.className = `channel ${activeVoice ? 'active' : ''}`;
-    b.textContent = `${activeVoice ? '🔊 Leave' : '🔈 Join'} ${c.name}`;
+    b.textContent = `${activeVoice ? '🔊 Leave' : '🔈 Join'} ${c.name}${c.archived ? ' (off)' : ''}`;
+    if (c.archived) b.style.opacity = '0.72';
     b.title = activeVoice ? `Leave ${c.name}` : `Join ${c.name}`;
-    b.onclick = ()=> joinVoiceRoom(c.name);
+    b.onclick = ()=> {
+      if (c.archived && canAdmin) return;
+      joinVoiceRoom(c.name);
+    };
     row.appendChild(b);
 
     if (canAdmin) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'ghost chanToggleBtn';
+      toggleBtn.textContent = c.archived ? 'Off' : 'On';
+      toggleBtn.title = 'Toggle channel visibility';
+      toggleBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await api(`/api/admin/channels/${c.id}`, 'PATCH', { archived: !c.archived });
+          await refreshAdmin();
+          await refreshChannels();
+          renderNavLists();
+        } catch (err) {
+          showError(`Channel toggle failed: ${humanError(err)}`);
+        }
+      };
+      row.appendChild(toggleBtn);
+
       const dragBtn = document.createElement('button');
       dragBtn.className = 'ghost chanDragHandle';
       dragBtn.textContent = '↕';
@@ -1634,8 +1675,15 @@ async function boot(){
     $('dmSearchInput')?.focus();
   };
 
-  $('adminModeToggle').onchange = ()=> {
+  $('adminModeToggle').onchange = async ()=> {
     state.adminMode = $('adminModeToggle').checked;
+    if (state.adminMode && (state.me?.username === 'mcassyblasty' || state.me?.is_admin)) {
+      try {
+        await refreshAdmin();
+      } catch (err) {
+        showError(`Failed to load full channel inventory: ${humanError(err)}`);
+      }
+    }
     renderNavLists();
     loadMessages().catch(()=>{});
   };

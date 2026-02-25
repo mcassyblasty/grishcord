@@ -17,15 +17,22 @@ Usage: ./scripts/grishcordctl.sh <command>
 
 Commands:
   start         Build + start services in detached mode, then wait for readiness
+  restart       Restart running services (compose restart) and wait for readiness
   stop          Stop the stack (compose down --remove-orphans)
   update-start  Pull latest images, rebuild, start, and wait for readiness
   status        Show compose status + LAN URL hint
   logs          Show recent logs for caddy/frontend/backend
+  doctor        Check docker/compose/curl availability and print quick diagnostics
 USAGE
 }
 
 docker_cmd() { "${DOCKER_PREFIX[@]}" "$DOCKER_BIN" "$@"; }
 compose_cmd() { docker_cmd compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"; }
+
+require_bin() {
+  local bin="$1"
+  command -v "$bin" >/dev/null 2>&1 || { err "required binary missing: $bin"; exit 1; }
+}
 
 ensure_docker_access() {
   if docker info >/dev/null 2>&1; then
@@ -39,6 +46,10 @@ ensure_docker_access() {
   fi
   err "docker is not accessible for this user."
   exit 1
+}
+
+supports_compose_wait() {
+  compose_cmd up --help 2>/dev/null | grep -q -- '--wait'
 }
 
 get_lan_ip() {
@@ -102,6 +113,12 @@ wait_for_service() {
     fi
     printf '[grishcordctl] waiting for %s: %s (%ss/%ss)\r' "$service" "$status" "$elapsed" "$timeout_s"
 
+    if [[ "$status" == exited || "$status" == dead ]]; then
+      printf '\n'
+      err "$service entered terminal state: $status"
+      return 1
+    fi
+
     if [[ "$status" == running/healthy || "$status" == running || "$status" == running/none ]]; then
       printf '\n'
       log "$service ready: $status"
@@ -110,6 +127,29 @@ wait_for_service() {
     if (( elapsed >= timeout_s )); then
       printf '\n'
       err "timed out waiting for $service (last status: $status)."
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_http() {
+  local url="$1"
+  local timeout_s="$2"
+  local start now elapsed
+  start="$(date +%s)"
+  while true; do
+    now="$(date +%s)"
+    elapsed=$(( now - start ))
+    if curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
+      printf '\n'
+      log "HTTP ready: $url"
+      return 0
+    fi
+    printf '[grishcordctl] waiting for http: %s (%ss/%ss)\r' "$url" "$elapsed" "$timeout_s"
+    if (( elapsed >= timeout_s )); then
+      printf '\n'
+      err "timed out waiting for HTTP endpoint: $url"
       return 1
     fi
     sleep 1
@@ -129,22 +169,56 @@ show_logs() {
 }
 
 start_stack() {
-  run_with_timer "compose up (build/start)" compose_cmd up -d --build --remove-orphans
+  if supports_compose_wait; then
+    run_with_timer "compose up (build/start + wait)" compose_cmd up -d --build --remove-orphans --wait --wait-timeout 240
+  else
+    run_with_timer "compose up (build/start)" compose_cmd up -d --build --remove-orphans
+  fi
   wait_for_service postgres 240
   wait_for_service backend 240
   wait_for_service frontend 180
   wait_for_service caddy 180
+  wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   show_status
 }
 
 update_start_stack() {
   run_with_timer "compose pull" compose_cmd pull
-  run_with_timer "compose up (update/build/start)" compose_cmd up -d --build --remove-orphans
+  if supports_compose_wait; then
+    run_with_timer "compose up (update/build/start + wait)" compose_cmd up -d --build --remove-orphans --wait --wait-timeout 240
+  else
+    run_with_timer "compose up (update/build/start)" compose_cmd up -d --build --remove-orphans
+  fi
   wait_for_service postgres 240
   wait_for_service backend 240
   wait_for_service frontend 180
   wait_for_service caddy 180
+  wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   show_status
+}
+
+restart_stack() {
+  run_with_timer "compose restart" compose_cmd restart
+  wait_for_service postgres 180
+  wait_for_service backend 180
+  wait_for_service frontend 120
+  wait_for_service caddy 120
+  wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
+  show_status
+}
+
+doctor() {
+  require_bin awk
+  require_bin hostname
+  require_bin curl
+  ensure_docker_access
+  log "docker: $(docker_cmd --version 2>/dev/null || true)"
+  log "compose: $(compose_cmd version 2>/dev/null | head -n 1 || true)"
+  log "compose file: $COMPOSE_FILE"
+  log "compose wait support: $(supports_compose_wait && echo yes || echo no)"
+  log "lan ip: $(get_lan_ip)"
+  log "caddy port: $(get_caddy_port)"
+  compose_cmd ps || true
 }
 
 stop_stack() {
@@ -161,13 +235,16 @@ main() {
   esac
 
   ensure_docker_access
+  require_bin curl
 
   case "$cmd" in
     start) start_stack ;;
+    restart) restart_stack ;;
     stop) stop_stack ;;
     update-start) update_start_stack ;;
     status) show_status ;;
     logs) show_logs ;;
+    doctor) doctor ;;
     *) err "unknown command: $cmd"; usage; exit 2 ;;
   esac
 }

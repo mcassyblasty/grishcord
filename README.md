@@ -4,11 +4,13 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
+- `./scripts/grishcordctl.sh restart` (fast service restart + readiness waits)
 - `./scripts/grishcordctl.sh stop` (verbose stop)
 - `./scripts/grishcordctl.sh update-start` (pull, rebuild, start with live timers)
 - `./scripts/grishcordctl.sh status` (compose status + LAN URL)
 - `./scripts/grishcordctl.sh logs` (recent stack logs)
-- `./scripts/run_grishcord.sh` (compat wrapper for `grishcordctl.sh start`)
+- `./scripts/grishcordctl.sh doctor` (check prerequisites + compose diagnostics)
+- `./scripts/run_grishcord.sh [command]` (compat wrapper; default `start`)
 
 ## Docs
 - `docs/GRISHCORD_SPEC.tex`

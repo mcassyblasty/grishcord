@@ -16,6 +16,8 @@ Run from repository root:
 \end{verbatim}
 The command performs a deterministic detached compose start (`-p grishcord`) and continuously prints elapsed-time progress while waiting for service readiness so it never appears frozen.
 
+If Docker Compose supports `--wait`, the script uses it automatically to reduce startup race conditions and improve readiness accuracy.
+
 \section{Update + start}
 \begin{verbatim}
 ./scripts/grishcordctl.sh update-start
@@ -24,6 +26,14 @@ The command starts/restarts in detached mode and prints the exact URL:
 \begin{verbatim}
 Open: http://<vm-ip>:<port>/
 \end{verbatim}
+
+\section{Restart + doctor}
+\begin{verbatim}
+./scripts/grishcordctl.sh restart
+./scripts/grishcordctl.sh doctor
+\end{verbatim}
+`restart` performs a fast compose restart with readiness waits and endpoint checks.\
+`doctor` validates required tools and prints compose diagnostics, LAN IP, and caddy port mapping.
 
 \section{Verification commands}
 \begin{verbatim}

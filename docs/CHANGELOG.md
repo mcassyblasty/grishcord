@@ -4,6 +4,21 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.39] - 2026-02-25
+### Changed
+- Improved `grishcordctl` lifecycle efficiency and reliability with optional Compose `--wait` support, terminal-state detection during readiness polling, and post-start HTTP endpoint verification.
+- Added `grishcordctl restart` and `grishcordctl doctor` commands for faster operational workflows and diagnostics.
+- Updated `run_grishcord.sh` to pass through an optional command (default `start`) to `grishcordctl`.
+
+## [0.3.38] - 2026-02-20
+### Fixed
+- Enabling Admin Mode now immediately refreshes full admin state so hidden/archived channels are available for inline sidebar re-enable toggles without needing to reopen Admin Settings.
+
+## [0.3.37] - 2026-02-17
+### Changed
+- In Admin Mode, the sidebar now renders the full channel inventory (including hidden/archived channels) for both text and voice sections.
+- Added per-channel inline `On`/`Off` buttons in Admin Mode to quickly toggle channel visibility without opening the three-dot menu.
+
 ## [0.3.36] - 2026-02-17
 ### Security
 - Added authentication endpoint rate limiting for login, registration, and recovery redeem/reset flows, returning HTTP 429 with `Retry-After`.

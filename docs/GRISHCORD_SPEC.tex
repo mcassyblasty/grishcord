@@ -69,6 +69,9 @@ The repository contains a canonical \texttt{VERSION} file and a human-readable r
 
 \subsection{Embedded Release Changelog (Living Summary)}
 \begin{itemize}
+  \item \textbf{0.3.39}: Enhanced ops scripts with compose wait support, restart/doctor commands, and stronger readiness checks including HTTP verification.
+  \item \textbf{0.3.38}: Admin Mode toggle now eagerly loads full admin channel state so hidden/archived channels can be re-enabled inline from the sidebar.
+  \item \textbf{0.3.37}: Admin Mode sidebar now shows all channels (including hidden/archived) and adds inline On/Off toggles for channel visibility.
   \item \textbf{0.3.36}: Added auth/recovery rate limits, allowlist-based CORS validation, and same-origin checks for mutating API requests.
   \item \textbf{0.3.35}: Reply targets now receive ping-equivalent notifications (including sound + highlight behavior) when someone replies to their message.
   \item \textbf{0.3.34}: Reverted delegated moderation to admin-only role controls, added global voice-channel enable/disable admin setting, polished admin users/channel-action UI alignment, and made message edits persist with visible edited markers.
