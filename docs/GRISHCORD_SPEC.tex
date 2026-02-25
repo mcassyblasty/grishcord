@@ -69,6 +69,7 @@ The repository contains a canonical \texttt{VERSION} file and a human-readable r
 
 \subsection{Embedded Release Changelog (Living Summary)}
 \begin{itemize}
+  \item \textbf{0.3.41}: Added compose DB host guardrails/defaults so backend uses `postgres` instead of localhost in containers, with explicit startup diagnostics.
   \item \textbf{0.3.40}: Added an interactive installer script supporting git/wget/curl with guided git identity setup when needed.
   \item \textbf{0.3.39}: Enhanced ops scripts with compose wait support, restart/doctor commands, and stronger readiness checks including HTTP verification.
   \item \textbf{0.3.38}: Admin Mode toggle now eagerly loads full admin channel state so hidden/archived channels can be re-enabled inline from the sidebar.

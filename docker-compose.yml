@@ -19,7 +19,7 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgres://grishcord:change_me@postgres:5432/grishcord}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       JWT_SECRET: ${JWT_SECRET}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}

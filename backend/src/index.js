@@ -20,7 +20,28 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+function runningInContainer() {
+  return fs.existsSync('/.dockerenv') || String(process.env.RUNNING_IN_DOCKER || '') === 'true';
+}
+
+function databaseHostFromUrl(raw) {
+  try {
+    return new URL(String(raw || '')).hostname;
+  } catch {
+    return '';
+  }
+}
+
+const databaseUrl = String(process.env.DATABASE_URL || '').trim();
+const databaseHost = databaseHostFromUrl(databaseUrl);
+if (runningInContainer() && (!databaseUrl || ['localhost', '127.0.0.1', '::1'].includes(databaseHost))) {
+  console.error('[startup][error] Invalid DATABASE_URL for container runtime.');
+  console.error('[startup][error] Backend container cannot reach Postgres at localhost/127.0.0.1.');
+  console.error('[startup][error] Use the compose service hostname: postgres (example: postgres://grishcord:***@postgres:5432/grishcord).');
+  process.exit(1);
+}
+
+const pool = new Pool({ connectionString: databaseUrl || undefined });
 const uploadsDir = process.env.UPLOADS_DIR || '/mnt/grishcord/uploads';
 await fsp.mkdir(uploadsDir, { recursive: true });
 

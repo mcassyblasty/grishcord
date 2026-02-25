@@ -4,6 +4,12 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.41] - 2026-02-25
+### Fixed
+- Prevented Compose backend startup misconfiguration by defaulting backend `DATABASE_URL` to use service host `postgres` when the env var is unset.
+- Added a backend startup guardrail that detects container runtime + localhost DB host and emits a clear error explaining to use `postgres` instead.
+- Updated env/docs guidance to avoid `ECONNREFUSED 127.0.0.1:5432` migration failures when Postgres is healthy in another container.
+
 ## [0.3.40] - 2026-02-25
 ### Changed
 - Added a top-level interactive installer script `install_grishcord.sh` that can run from anywhere and supports install via `git`, `wget`, or `curl`.

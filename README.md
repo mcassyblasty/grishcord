@@ -37,3 +37,6 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 - `PUBLIC_BASE_URL` should match your externally reachable app URL.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
 - Authentication and recovery endpoints are rate-limited server-side; repeated failures receive HTTP `429` with `Retry-After`.
+
+## Compose database host note
+- In Docker Compose, `DATABASE_URL` must target the service hostname `postgres` (not `localhost` / `127.0.0.1`).

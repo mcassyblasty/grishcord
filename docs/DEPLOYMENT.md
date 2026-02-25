@@ -22,6 +22,10 @@ docker compose -p grishcord -f docker-compose.yml up -d --build
 docker compose -p grishcord -f docker-compose.yml ps
 ```
 
+## Important DB host rule for Compose
+- Ensure `DATABASE_URL` uses host `postgres` (the compose service name), not `localhost`/`127.0.0.1`.
+- If backend logs show `ECONNREFUSED 127.0.0.1:5432` during migrations, update `DATABASE_URL` to `...@postgres:5432/...` and restart.
+
 ## Data persistence
 All persistent data is under `/mnt/grishcord` via bind mounts:
 - Postgres: `/mnt/grishcord/postgres`
