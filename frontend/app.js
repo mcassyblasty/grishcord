@@ -407,7 +407,7 @@ function renderMessage(m){
           const chip = document.createElement('button');
           chip.type = 'button';
           chip.className = 'ghost';
-          chip.textContent = `Attached #${up.id} ×`;
+          chip.textContent = `Attached ${up.content_type?.startsWith('image/') ? 'image' : 'file'} #${up.id} ×`;
           chip.onclick = () => {
             const idx = selectedUploads.findIndex((x) => Number(x.id) === Number(up.id));
             if (idx >= 0) selectedUploads.splice(idx, 1);
@@ -419,7 +419,7 @@ function renderMessage(m){
           const chip = document.createElement('button');
           chip.type = 'button';
           chip.className = 'ghost';
-          chip.textContent = `${file.name || 'new-image'} ×`;
+          chip.textContent = `${file.name || 'new-file'} ×`;
           chip.onclick = () => {
             const idx = pendingFiles.indexOf(file);
             if (idx >= 0) pendingFiles.splice(idx, 1);
@@ -432,16 +432,16 @@ function renderMessage(m){
       const addUploadBtn = document.createElement('button');
       addUploadBtn.type = 'button';
       addUploadBtn.className = 'ghost';
-      addUploadBtn.textContent = 'Add image';
+      addUploadBtn.textContent = 'Add file';
       const addUploadInput = document.createElement('input');
       addUploadInput.type = 'file';
-      addUploadInput.accept = 'image/*';
+      addUploadInput.accept = 'image/*,.zip,application/zip';
       addUploadInput.multiple = true;
       addUploadInput.className = 'hidden';
       addUploadBtn.onclick = () => addUploadInput.click();
       addUploadInput.onchange = () => {
         for (const file of Array.from(addUploadInput.files || [])) {
-          if (!String(file.type || '').startsWith('image/')) continue;
+          if (!isAllowedAttachment(file)) continue;
           pendingFiles.push(file);
         }
         addUploadInput.value = '';
@@ -467,7 +467,7 @@ function renderMessage(m){
         try {
           const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
           for (const file of pendingFiles) {
-            const up = await uploadImageFile(file);
+            const up = await uploadAttachmentFile(file);
             if (up.uploadId) uploadIds.push(Number(up.uploadId));
           }
           const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next, uploadIds });
@@ -774,7 +774,7 @@ function closeSidebarOnMobile() {
   if (window.innerWidth <= 960) document.body.classList.remove('showSidebar');
 }
 
-async function uploadImageFile(file) {
+async function uploadAttachmentFile(file) {
   const fd = new FormData();
   fd.append('image', file);
   const res = await fetch('/api/upload-image', { method: 'POST', credentials: 'include', body: fd });
@@ -1859,7 +1859,7 @@ async function boot(){
       const replyToId = state.replyTo?.id || null;
       const uploadIds = [];
       if (state.pendingImageFile) {
-        const up = await uploadImageFile(state.pendingImageFile);
+        const up = await uploadAttachmentFile(state.pendingImageFile);
         if (up.uploadId) uploadIds.push(up.uploadId);
       }
       await api('/api/messages','POST',{body: rawBody,replyToId,uploadIds,channelId: state.mode==='channel' ? state.activeChannelId : null, dmPeerId: state.mode==='dm' ? state.activeDmPeerId : null});

@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.45] - 2026-02-26
+### Fixed
+- Message edit attachments now support both image and `.zip` files: users can remove existing attachments from an already-sent message and add new allowed files before saving edits.
+- Edit attachment chips now label existing attachments as image/file for clearer remove behavior while editing.
+
 ## [0.3.44] - 2026-02-25
 ### Fixed
 - `grishcordctl.sh update-start` now updates source code before rebuilding: it performs `git pull --ff-only` for git checkouts, or uses installer metadata to re-download archives for wget/curl installs.
