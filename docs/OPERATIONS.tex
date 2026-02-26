@@ -22,7 +22,7 @@ If Docker Compose supports `--wait`, the script uses it automatically to reduce 
 \begin{verbatim}
 ./scripts/grishcordctl.sh update-start
 \end{verbatim}
-The command starts/restarts in detached mode and prints the exact URL:
+The command first updates source checkout (git pull for git installs, archive re-download for wget/curl installs when installer metadata is present), then rebuilds/restarts in detached mode and prints the exact URL:
 \begin{verbatim}
 Open: http://<vm-ip>:<port>/
 \end{verbatim}

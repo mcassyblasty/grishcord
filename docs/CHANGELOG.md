@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.44] - 2026-02-25
+### Fixed
+- `grishcordctl.sh update-start` now updates source code before rebuilding: it performs `git pull --ff-only` for git checkouts, or uses installer metadata to re-download archives for wget/curl installs.
+- Installer now writes `.grishcord-install.env` (method/repo/archive metadata) so update workflows can be automated consistently.
+
 ## [0.3.43] - 2026-02-25
 ### Changed
 - Added support for `.zip` file uploads up to 100MB (`MAX_UPLOAD_BYTES`), alongside existing image attachments.

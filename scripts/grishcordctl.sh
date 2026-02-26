@@ -4,6 +4,7 @@ set -Eeuo pipefail
 PROJECT_NAME="grishcord"
 APP_DIR_REAL="$(cd "$(dirname "$0")/.." && pwd -P)"
 COMPOSE_FILE="$APP_DIR_REAL/docker-compose.yml"
+INSTALL_META_FILE="$APP_DIR_REAL/.grishcord-install.env"
 DOCKER_BIN="docker"
 DOCKER_PREFIX=()
 
@@ -32,6 +33,12 @@ compose_cmd() { docker_cmd compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"; }
 require_bin() {
   local bin="$1"
   command -v "$bin" >/dev/null 2>&1 || { err "required binary missing: $bin"; exit 1; }
+}
+
+safe_load_install_meta() {
+  [[ -f "$INSTALL_META_FILE" ]] || return 0
+  # shellcheck disable=SC1090
+  source "$INSTALL_META_FILE"
 }
 
 ensure_docker_access() {
@@ -96,6 +103,52 @@ run_with_timer() {
   now="$(date +%s)"
   elapsed=$(( now - start ))
   log "$title completed in ${elapsed}s."
+}
+
+update_source_checkout() {
+  safe_load_install_meta
+  local method="${INSTALL_METHOD:-}"
+  local repo_url="${REPO_URL:-}"
+  local archive_url="${ARCHIVE_URL:-}"
+
+  if [[ -d "$APP_DIR_REAL/.git" ]]; then
+    require_bin git
+    run_with_timer "git pull (source update)" git -C "$APP_DIR_REAL" pull --ff-only
+    return 0
+  fi
+
+  if [[ -z "$method" ]]; then
+    warn "No source update metadata found ($INSTALL_META_FILE). Skipping source code update step."
+    return 0
+  fi
+
+  case "$method" in
+    wget|curl)
+      [[ -n "$archive_url" ]] || { warn "ARCHIVE_URL missing in $INSTALL_META_FILE; skipping source update step."; return 0; }
+      require_bin tar
+      local tmp_archive tmp_dir
+      tmp_archive="$(mktemp /tmp/grishcord-update.XXXXXX.tar.gz)"
+      tmp_dir="$(mktemp -d /tmp/grishcord-update.XXXXXX)"
+      if [[ "$method" == "wget" ]]; then
+        require_bin wget
+        run_with_timer "source update download (wget)" wget -O "$tmp_archive" "$archive_url"
+      else
+        require_bin curl
+        run_with_timer "source update download (curl)" curl -fL --retry 3 --connect-timeout 10 -o "$tmp_archive" "$archive_url"
+      fi
+      run_with_timer "source update extract" tar -xzf "$tmp_archive" -C "$tmp_dir" --strip-components=1
+      run_with_timer "source update apply" cp -a "$tmp_dir"/. "$APP_DIR_REAL"/
+      rm -rf "$tmp_archive" "$tmp_dir"
+      ;;
+    git)
+      if [[ -n "$repo_url" ]]; then
+        warn "Install metadata says git, but .git directory is missing; cannot safely pull."
+      fi
+      ;;
+    *)
+      warn "Unknown INSTALL_METHOD '$method' in $INSTALL_META_FILE; skipping source update step."
+      ;;
+  esac
 }
 
 wait_for_service() {
@@ -183,6 +236,7 @@ start_stack() {
 }
 
 update_start_stack() {
+  update_source_checkout
   run_with_timer "compose pull" compose_cmd pull
   if supports_compose_wait; then
     run_with_timer "compose up (update/build/start + wait)" compose_cmd up -d --build --remove-orphans --wait --wait-timeout 240

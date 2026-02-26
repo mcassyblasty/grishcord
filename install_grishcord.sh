@@ -154,6 +154,7 @@ main() {
 
   if [[ "$method" == "git" ]]; then
     install_via_git "$repo_url" "$target_dir"
+    archive_url="$(derive_archive_url "$repo_url")"
   else
     archive_url="$(prompt 'Archive URL (.tar.gz)' "$(derive_archive_url "$repo_url")")"
     if [[ "$method" == "wget" ]]; then
@@ -162,6 +163,13 @@ main() {
       install_via_curl "$archive_url" "$target_dir"
     fi
   fi
+
+  cat > "$target_dir/.grishcord-install.env" <<META
+INSTALL_METHOD=$method
+REPO_URL=$repo_url
+ARCHIVE_URL=$archive_url
+META
+  log "Wrote install metadata: $target_dir/.grishcord-install.env"
 
   log "Install complete: $target_dir"
   cat <<NEXT
