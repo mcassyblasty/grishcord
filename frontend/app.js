@@ -403,18 +403,20 @@ function renderMessage(m){
 
       const redrawUploadChips = () => {
         uploadChips.textContent = '';
-        for (const up of selectedUploads) {
+        selectedUploads.forEach((up, i) => {
           const chip = document.createElement('button');
           chip.type = 'button';
           chip.className = 'ghost';
-          chip.textContent = `Attached ${up.content_type?.startsWith('image/') ? 'image' : 'file'} #${up.id} ×`;
+          const kind = up.content_type?.startsWith('image/') ? 'image' : 'file';
+          const ord = selectedUploads.length > 1 ? ` ${i + 1}` : '';
+          chip.textContent = `Attached ${kind}${ord} ×`;
           chip.onclick = () => {
             const idx = selectedUploads.findIndex((x) => Number(x.id) === Number(up.id));
             if (idx >= 0) selectedUploads.splice(idx, 1);
             redrawUploadChips();
           };
           uploadChips.appendChild(chip);
-        }
+        });
         for (const file of pendingFiles) {
           const chip = document.createElement('button');
           chip.type = 'button';

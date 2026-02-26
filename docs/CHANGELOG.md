@@ -4,6 +4,10 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.46] - 2026-02-26
+### Fixed
+- Edit-mode attachment chips no longer display raw upload database IDs (e.g., `#5`) for single-file messages; labels now show user-friendly attachment names (`Attached image` / `Attached file`) and only include sequence numbers when multiple attachments exist.
+
 ## [0.3.45] - 2026-02-26
 ### Fixed
 - Message edit attachments now support both image and `.zip` files: users can remove existing attachments from an already-sent message and add new allowed files before saving edits.
