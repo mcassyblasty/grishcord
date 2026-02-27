@@ -339,7 +339,7 @@ app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
   const settings = await pool.query('SELECT value FROM app_settings WHERE key = $1', ['voice_enabled']);
   const voiceEnabled = settings.rows[0] ? settings.rows[0].value !== false : true;
   const { rows } = await pool.query(
-    'SELECT id, name, kind, position FROM channels WHERE archived=false AND ($1::boolean = true OR kind <> $2) ORDER BY kind ASC, position ASC, id ASC',
+    'SELECT id, name, kind, position, announcement_only FROM channels WHERE archived=false AND ($1::boolean = true OR kind <> $2) ORDER BY kind ASC, position ASC, id ASC',
     [voiceEnabled, 'voice']
   );
   res.json(rows);
@@ -351,7 +351,7 @@ app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, async (r
   if (!name) return res.status(400).json({ error: 'name_required' });
   if (!['text', 'voice'].includes(kind)) return res.status(400).json({ error: 'invalid_kind' });
   const pos = await pool.query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM channels WHERE kind = $1', [kind]);
-  await pool.query('INSERT INTO channels(name, kind, position, archived) VALUES ($1, $2, $3, false)', [name, kind, Number(pos.rows[0].next)]);
+  await pool.query('INSERT INTO channels(name, kind, position, archived, announcement_only) VALUES ($1, $2, $3, false, false)', [name, kind, Number(pos.rows[0].next)]);
   res.json({ ok: true });
 });
 
@@ -361,6 +361,7 @@ app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asy
   const name = req.body.name === undefined ? null : String(req.body.name).trim();
   const position = req.body.position === undefined ? null : Number(req.body.position);
   const archived = req.body.archived === undefined ? null : req.body.archived === true;
+  const announcementOnly = req.body.announcementOnly === undefined ? null : req.body.announcementOnly === true;
   const current = await pool.query('SELECT id FROM channels WHERE id = $1', [id]);
   if (!current.rows[0]) return res.status(404).json({ error: 'not_found' });
   if (name !== null) {
@@ -373,6 +374,9 @@ app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asy
   }
   if (archived !== null) {
     await pool.query('UPDATE channels SET archived = $1 WHERE id = $2', [archived, id]);
+  }
+  if (announcementOnly !== null) {
+    await pool.query('UPDATE channels SET announcement_only = $1 WHERE id = $2', [announcementOnly, id]);
   }
   res.json({ ok: true });
 });
@@ -405,7 +409,7 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
 app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
   const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, created_at FROM users ORDER BY id ASC');
-  const channels = await pool.query('SELECT id, name, kind, position, archived FROM channels ORDER BY kind ASC, position ASC, id ASC');
+  const channels = await pool.query('SELECT id, name, kind, position, archived, announcement_only FROM channels ORDER BY kind ASC, position ASC, id ASC');
   const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2, $3)', ['anti_spam_level', 'voice_bitrate', 'voice_enabled']);
   const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
   const level = Number(settingMap.anti_spam_level ?? 5);
@@ -633,6 +637,14 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   const { channelId = null, dmPeerId = null, body, replyToId = null, uploadIds = [] } = req.body;
   if (req.userDb.disabled) return res.status(403).json({ error: 'disabled' });
   if (!channelId && !dmPeerId) return res.status(400).json({ error: 'target_required' });
+  if (channelId) {
+    const ch = await pool.query('SELECT id, announcement_only FROM channels WHERE id = $1 AND archived = false', [Number(channelId)]);
+    const channel = ch.rows[0];
+    if (!channel) return res.status(404).json({ error: 'not_found' });
+    if (channel.announcement_only === true && !userCanAdmin(req.userDb)) {
+      return res.status(403).json({ error: 'announcement_admin_only' });
+    }
+  }
   const text = String(body || '').slice(0, 10000);
   const ids = Array.isArray(uploadIds)
     ? [...new Set(uploadIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))].slice(0, 8)

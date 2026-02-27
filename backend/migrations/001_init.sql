@@ -49,12 +49,14 @@ CREATE TABLE IF NOT EXISTS channels (
   kind text NOT NULL DEFAULT 'text',
   position integer NOT NULL,
   archived boolean NOT NULL DEFAULT false,
+  announcement_only boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
 ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_kind_check;
 ALTER TABLE channels ADD CONSTRAINT channels_kind_check CHECK (kind IN ('text', 'voice'));
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS announcement_only boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS messages (
   id bigserial PRIMARY KEY,

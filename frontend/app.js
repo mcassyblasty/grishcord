@@ -204,6 +204,7 @@ function humanError(err){
   if (msg === 'invalid_color') return 'Display color must be a hex color like #AABBCC.';
   if (msg === 'invalid_reply_target') return 'Cannot reply to a message outside the current conversation.';
   if (msg === 'empty_body') return 'Message cannot be empty.';
+  if (msg === 'announcement_admin_only') return 'This is an announcement channel. Only admins can post here.';
   if (msg === 'forbidden') return 'You do not have permission for that action.';
   if (msg === 'admin_only') return 'Admin access required.';
   if (msg === 'cannot_demote_primary_admin') return 'Primary admin cannot be demoted.';
@@ -965,6 +966,25 @@ function setComposerEnabled(enabled, placeholder = null) {
   $('msgInput').placeholder = placeholder ?? defaultComposerPlaceholder();
 }
 
+
+function activeTextChannelMeta() {
+  return state.channels.find((c) => Number(c.id) === Number(state.activeChannelId) && c.kind !== 'voice') || null;
+}
+
+function applyComposerPolicyForCurrentContext() {
+  if (state.mode !== 'channel') return;
+  const channel = activeTextChannelMeta();
+  if (!channel) {
+    setComposerEnabled(true);
+    return;
+  }
+  if (channel.announcement_only && !(state.me?.is_admin || state.me?.username === 'mcassyblasty')) {
+    setComposerEnabled(false, 'Announcement channel: only admins can post');
+    return;
+  }
+  setComposerEnabled(true);
+}
+
 function focusComposer() {
   const input = $('msgInput');
   if (!input || input.disabled) return;
@@ -1328,6 +1348,13 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
     closeAnyChannelMenus();
     await onDone();
   };
+  const announce = document.createElement('button');
+  announce.textContent = channel.announcement_only ? 'Disable announcement-only' : 'Enable announcement-only';
+  announce.onclick = async () => {
+    await api(`/api/admin/channels/${channel.id}`, 'PATCH', { announcementOnly: !channel.announcement_only });
+    closeAnyChannelMenus();
+    await onDone();
+  };
   const archive = document.createElement('button');
   archive.textContent = 'Archive';
   archive.onclick = async () => {
@@ -1336,7 +1363,7 @@ function renderChannelActionMenu(anchorBtn, channel, onDone) {
     closeAnyChannelMenus();
     await onDone();
   };
-  menu.append(rename, toggle, archive);
+  menu.append(rename, toggle, announce, archive);
   const row = anchorBtn.closest('.chanRow');
   row?.appendChild(menu);
 }
@@ -1368,7 +1395,7 @@ function renderNavLists(){
 
     const b = document.createElement('button');
     b.className = `channel ${state.mode==='channel' && state.activeChannelId===c.id ? 'active':''}`;
-    b.textContent = `# ${c.name}${c.archived ? ' (off)' : ''}`;
+    b.textContent = `# ${c.name}${c.announcement_only ? ' 📢' : ''}${c.archived ? ' (off)' : ''}`;
     if (c.archived) b.style.opacity = '0.72';
     b.onclick = async()=>{
       state.mode='channel';
@@ -1376,8 +1403,8 @@ function renderNavLists(){
       switchSidebarView('server');
       state.activeChannelId = c.id;
       state.activeDmPeerId = null;
-      text($('chatHeader'), `# ${c.name}`);
-      setComposerEnabled(true);
+      text($('chatHeader'), `# ${c.name}${c.announcement_only ? ' 📢' : ''}`);
+      applyComposerPolicyForCurrentContext();
       renderNavLists();
       await loadMessages();
       focusComposer();
@@ -1590,8 +1617,9 @@ async function afterAuth(){
   state.sidebarView = 'server';
   state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
   state.activeDmPeerId = null;
-  text($('chatHeader'), `# ${(state.channels.find((c) => c.id === state.activeChannelId) || {}).name || 'general'}`);
-  setComposerEnabled(true);
+  const initialChannel = state.channels.find((c) => c.id === state.activeChannelId) || {};
+  text($('chatHeader'), `# ${initialChannel.name || 'general'}${initialChannel.announcement_only ? ' 📢' : ''}`);
+  applyComposerPolicyForCurrentContext();
 
   showApp();
   switchSidebarView('server');
@@ -1618,6 +1646,7 @@ async function refreshChannels(){
   if (!state.channels.some((c)=>c.id===prev && c.kind !== 'voice')) {
     state.activeChannelId = state.channels.find((c)=>c.kind !== 'voice')?.id || null;
   }
+  applyComposerPolicyForCurrentContext();
   renderNavLists();
   if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
 }
@@ -1670,9 +1699,17 @@ function renderChannelAdmin(){
       await refreshAdmin();
       renderChannelAdmin();
     };
+    const announce = document.createElement('button');
+    announce.textContent = c.announcement_only ? 'Announce: On' : 'Announce: Off';
+    announce.onclick = async()=>{
+      await api(`/api/admin/channels/${c.id}`, 'PATCH', { announcementOnly: !c.announcement_only });
+      await refreshChannels();
+      await refreshAdmin();
+      renderChannelAdmin();
+    };
     const label = document.createElement('span');
     label.textContent = `[${c.kind}] #${c.id}`;
-    row.append(label, nameInput, save, up, down, hide, del);
+    row.append(label, nameInput, save, up, down, hide, announce, del);
     list.appendChild(row);
   }
 }
@@ -1830,8 +1867,8 @@ async function boot(){
     const active = state.channels.find((c) => c.id === state.activeChannelId && c.kind !== 'voice') || state.channels.find((c) => c.kind !== 'voice');
     if (active) {
       state.activeChannelId = active.id;
-      text($('chatHeader'), `# ${active.name}`);
-      setComposerEnabled(true);
+      text($('chatHeader'), `# ${active.name}${active.announcement_only ? ' 📢' : ''}`);
+      applyComposerPolicyForCurrentContext();
       renderNavLists();
       await loadMessages();
       focusComposer();

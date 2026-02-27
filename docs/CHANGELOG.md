@@ -4,6 +4,15 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.0] - 2026-02-26
+### Added
+- Channel announcement-only mode: admins can toggle channels so only admins can post while all users can still read messages.
+- Admin channel controls now expose announcement-only toggles in both channel editor rows and channel action menu.
+
+### Changed
+- Channel list/header now visually mark announcement channels with a 📢 indicator.
+- Non-admin users have composer input disabled automatically when viewing announcement-only channels.
+
 ## [0.3.50] - 2026-02-26
 ### Added
 - Added browser notifications integration using the Web Notifications API with explicit permission prompt support from the Notifications menu.
