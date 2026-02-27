@@ -1,0 +1,103 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\title{Grishcord Canonical Specification}
+\author{Private deployment for up to 50 users}
+\date{\today}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Overview and Non-goals}
+Grishcord is a minimal, single-server, Discord-like web app for approximately 25 close friends (hard upper target: 50 users). Non-goals: multiple servers, avatars, embeds, reactions, threads, bots, markdown rendering, rich formatting, video uploads, and backup systems.
+
+\section{User Interface}
+\subsection{Layouts}
+Two responsive layouts are supported: (1) wide layout with server-first left navigation: text channels and voice channels are shown in the default server view, and a dedicated DMs button switches into a DM list view; admin settings open as an admin-only pop-out from the settings menu; (2) portrait layout with channel list in a drawer/hamburger pattern and full-screen chat timeline. Authentication screen is login-first, with registration and recovery hidden behind a compact helper dropdown below the login form.
+\subsection{Themes}
+Two themes only: OLED ($\#000$ background, $\#fff$ text) and Discord-like dark palette. Theme switching is available from the in-app settings menu after login. Authentication actions provide explicit success/error feedback and wrong-password messaging.
+\subsection{Typography}
+Inter is used for readability.
+
+\section{Identity and Authentication}
+Users have immutable \texttt{username} and mutable \texttt{display\_name}. Users can set an optional \texttt{display\_color} (hex RGB) from account settings; that color is rendered for their message author labels. Admin is the account with username \texttt{mcassyblasty}. Sessions are JWT cookies (HttpOnly) carrying user id and session version. Logout invalidates the server-side session version immediately and clears the auth cookie with matching attributes. Secure-cookie mode is applied only on HTTPS requests so LAN HTTP testing can still authenticate correctly while preserving secure behavior under TLS.
+
+\section{Invites and Registration}
+Registration requires invite token + username + password + display name. Invite tokens are cryptographically random, single-use by default, and expiring (default 7 days). Database stores only invite token hashes.
+
+\section{Password Recovery}
+Admin generates user-specific, single-use, expiring (default 1 hour) recovery links. Database stores only hash of recovery token. On first valid redemption/click, server immediately increments user session version, invalidating all existing sessions before password reset completion.
+
+\section{Channels, DMs, and Messages}
+One server only. Admin can create, rename, reorder, archive, and hide/unhide both text and voice channels through the Admin Settings channel editor (visibility changes apply immediately). DMs are open to all users and exposed via a dedicated DMs navigation entry; the DM list is ordered by most recent conversation activity (newest to oldest) and refreshed in near-realtime for fast peer appearance. Realtime DM rendering is strictly participant-scoped so only the two DM participants see DM traffic; client matching uses explicit two-party DM participant metadata. Messages are plain text only; no markdown or HTML rendering. Multiline message content is preserved end-to-end (including explicit newlines entered with Shift+Enter). Messages support lightweight Discord-like reply context; users can edit/delete their own messages, and admins can moderate deletes in Admin Mode. Image attachments are supported via paste or file picker with normalized in-chat preview sizing and full-resolution lightbox view on click. Storage limit is 10{,}000 chars; timeline initially renders first 2{,}000 chars with a Read More expansion to full stored text. When no messages exist, the authenticated chat view shows an explicit empty-state prompt.
+
+\section{Images}
+Uploads support png, jpg/jpeg, gif, webp, and zip files; SVG and other types are rejected. Server validates signatures via magic bytes (with zip filename fallback) and stores files under \texttt{/mnt/grishcord/uploads} with UUID-based names requiring authentication to fetch. Default max upload size: 100MB.
+
+\section{Realtime}
+WebSocket transport provides realtime updates. Client reconnect flow fetches messages since last known id/timestamp to avoid missed messages and uses idempotent server-generated message ids.
+
+\section{Anti-spam Slider}
+Admin panel includes one-click invite generation, invite revocation, recovery key generation, user disable/enable controls, verified user deletion (exact username re-entry + explicit checkbox), global anti-spam level, voice bitrate controls, and an explicit Admin Mode toggle that enables moderation/editor controls in the main app (including message deletion and channel editing). Anti-spam exact mapping:
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+Level & Burst & Sustained (/min) & Cooldown (s)\\
+\midrule
+1 & 3 & 10 & 120\\
+3 & 5 & 15 & 60\\
+5 & 8 & 25 & 30\\
+7 & 12 & 40 & 15\\
+10 & 20 & 80 & 0--5\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Voice}
+Voice currently provides browser WebRTC audio for exactly two lobbies: \texttt{lobby-a} and \texttt{lobby-b}. UI exposes join/leave and mute/unmute with live peer-count status, and signaling runs over the authenticated WebSocket path. TURN/coturn settings remain deployable for NAT traversal hardening; admin can configure preferred voice bitrate metadata (default 32kbps, bounded).
+
+\section{Storage-full Eviction Policy}
+Automatic retention runs periodically (default 2 minutes) and can be triggered on message send/upload. If \texttt{/mnt/grishcord} usage exceeds threshold (default 90\%), the system deletes oldest messages first until usage falls below threshold; associated image files are deleted when their message references are removed.
+
+\section{Deployment Summary}
+Docker Compose services: reverse proxy (Caddy), frontend, backend (API+WS), Postgres, LiveKit, coturn. Persistent bind mounts: \texttt{/mnt/grishcord/postgres}, \texttt{/mnt/grishcord/uploads}, and \texttt{/mnt/grishcord/config}.
+
+\section{Versioning and Change History}
+The repository contains a canonical \texttt{VERSION} file and a human-readable release history in \texttt{docs/CHANGELOG.md}. The backend exposes \texttt{/api/version} and includes version metadata in \texttt{/health} for runtime verification. Recent release families are tracked in the changelog (e.g., 0.3.1 auth UX restructure, 0.3.2 HTTP cookie/session reliability, 0.3.3 CSP-safe frontend script loading fix).
+
+\subsection{Embedded Release Changelog (Living Summary)}
+\begin{itemize}
+  \item v0.3.48: edit attachment chips are numbered by editor display order (1..N) instead of upload DB IDs.
+  \item v0.3.47: attachment-only message edits now save correctly, including removing/replacing files on messages with empty text bodies.
+  \item v0.3.46: edit attachment chips now use user-facing labels instead of raw upload IDs; sequence numbers appear only when multiple attachments are present.
+  \item v0.3.45: message edit flow now supports adding/removing allowed attachments (images + .zip) on existing messages.
+
+  \item \textbf{0.3.44}: `update-start` now updates source checkout (git pull or archive refresh via installer metadata) before compose rebuild/restart.
+  \item \textbf{0.3.43}: Added `.zip` attachment upload support (100MB default), updated composer picker, and rendered non-image attachments as download links.
+  \item \textbf{0.3.42}: Editing a message now supports adding/removing attached images, and exiting reply/edit UI returns focus to the composer.
+  \item \textbf{0.3.41}: Added compose DB host guardrails/defaults so backend uses `postgres` instead of localhost in containers, with explicit startup diagnostics.
+  \item \textbf{0.3.40}: Added an interactive installer script supporting git/wget/curl with guided git identity setup when needed.
+  \item \textbf{0.3.39}: Enhanced ops scripts with compose wait support, restart/doctor commands, and stronger readiness checks including HTTP verification.
+  \item \textbf{0.3.38}: Admin Mode toggle now eagerly loads full admin channel state so hidden/archived channels can be re-enabled inline from the sidebar.
+  \item \textbf{0.3.37}: Admin Mode sidebar now shows all channels (including hidden/archived) and adds inline On/Off toggles for channel visibility.
+  \item \textbf{0.3.36}: Added auth/recovery rate limits, allowlist-based CORS validation, and same-origin checks for mutating API requests.
+  \item \textbf{0.3.35}: Reply targets now receive ping-equivalent notifications (including sound + highlight behavior) when someone replies to their message.
+  \item \textbf{0.3.34}: Reverted delegated moderation to admin-only role controls, added global voice-channel enable/disable admin setting, polished admin users/channel-action UI alignment, and made message edits persist with visible edited markers.
+  \item \textbf{0.3.33}: Replaced legacy ops scripts with verbose \texttt{grishcordctl} lifecycle commands (start/stop/update-start/status/logs) with continuous elapsed-time progress output.
+  \item \textbf{0.3.32}: Refined Admin Settings ordering, added invite CSV export workflow, and introduced delegated moderator/admin role toggles in user management.
+  \item \textbf{0.3.31}: Added built-in Web Audio fallback notification tone so DM/ping alerts still produce sound when WAV assets are unavailable in restricted environments.
+  \item \textbf{0.3.30}: Added account-persistent notification sound toggle in the notifications menu (default on), synchronized via backend user preferences across devices.
+  \item \textbf{0.3.29}: Integrated notification WAV assets from \texttt{frontend/audio/}; incoming DM/ping notifications now play the message-received sound for immediate feedback.
+  \item \textbf{0.3.28}: Added delegated admin-role toggles, persistent backend-backed DM/ping notifications with consume-on-click, non-blocking in-app confirm/prompt/toast UX, and backend-provided voice ICE configuration for stronger connectivity.
+  \item \textbf{0.3.16}: Added clipboard/file image attachments + lightbox, fixed compose version warnings/runtime version source handling, and improved mobile/voice robustness.
+  \item \textbf{0.3.15}: Added reply/edit/delete message actions, channel hide/unhide controls, robust mobile sidebar/composer behavior, and safer DM participant scoping.
+  \item \textbf{0.3.14}: Fixed strict DM participant visibility, added account display name/color editing, and improved mobile outside-click sidebar close behavior.
+  \item \textbf{0.3.13--0.3.1}: Admin/sidebar/auth UX iterations, CSP-safe frontend script loading, and HTTP session-cookie reliability fixes.
+\end{itemize}
+
+\section{Security Rules}
+User content is escaped and never rendered as HTML. Linkify allows only \texttt{http://} and \texttt{https://}. SQL is parameterized. Reverse proxy sets CSP, \texttt{X-Content-Type-Options: nosniff}, and Referrer-Policy. Login/recovery endpoints are rate-limit candidates by design.
+
+\end{document}
