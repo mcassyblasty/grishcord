@@ -241,23 +241,27 @@ function renderMessageUploads(wrap, uploads = []) {
   imgWrap.className = 'msgUploads';
   const fileWrap = document.createElement('div');
   fileWrap.className = 'row';
+  let imageOrder = 0;
+  let fileOrder = 0;
   for (const up of uploads) {
     const ct = String(up.content_type || '');
     if (ct.startsWith('image/')) {
+      imageOrder += 1;
       const img = document.createElement('img');
       img.className = 'msgImage';
       img.src = up.url;
-      img.alt = 'Uploaded image';
+      img.alt = `Attached image ${imageOrder}`;
       img.loading = 'lazy';
       img.onclick = () => openLightbox(up.url);
       imgWrap.appendChild(img);
       continue;
     }
+    fileOrder += 1;
     const fileLink = document.createElement('a');
     fileLink.href = up.url;
     fileLink.target = '_blank';
     fileLink.rel = 'noopener noreferrer';
-    fileLink.textContent = `Attachment #${up.id}`;
+    fileLink.textContent = `Attached file ${fileOrder}`;
     fileLink.className = 'small';
     fileWrap.appendChild(fileLink);
   }

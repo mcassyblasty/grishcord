@@ -4,6 +4,21 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.49] - 2026-02-26
+### Fixed
+- Non-image attachment labels in messages now use display-order numbering (`Attached file 1`, `Attached file 2`, ...) instead of raw upload IDs.
+- Toast/error notifications now appear at the top-center of the screen for clearer visibility.
+
+## [0.3.48] - 2026-02-26
+### Fixed
+- Edit attachment chips are now numbered strictly by visible order in the message editor (1..N), never by database upload IDs.
+- New files queued during edit are also numbered in sequence after existing attachments to preserve clear ordering.
+
+## [0.3.47] - 2026-02-26
+### Fixed
+- Fixed message edit save logic for attachment-only edits: removing/replacing files now works even when message text is empty.
+- Edit save now no-ops cleanly when nothing changed, and shows a clear error only when resulting message would truly be empty (no text and no attachments).
+
 ## [0.3.46] - 2026-02-26
 ### Fixed
 - Edit-mode attachment chips no longer display raw upload database IDs (e.g., `#5`) for single-file messages; labels now show user-friendly attachment names (`Attached image` / `Attached file`) and only include sequence numbers when multiple attachments exist.
