@@ -397,6 +397,7 @@ function renderMessage(m){
       uploadEditor.style.marginTop = '.4rem';
 
       const selectedUploads = Array.isArray(m.uploads) ? m.uploads.map((u) => ({ ...u })) : [];
+      const initialUploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
       const pendingFiles = [];
       const uploadChips = document.createElement('div');
       uploadChips.className = 'row';
@@ -408,8 +409,7 @@ function renderMessage(m){
           chip.type = 'button';
           chip.className = 'ghost';
           const kind = up.content_type?.startsWith('image/') ? 'image' : 'file';
-          const ord = selectedUploads.length > 1 ? ` ${i + 1}` : '';
-          chip.textContent = `Attached ${kind}${ord} ×`;
+          chip.textContent = `Attached ${kind} ${i + 1} ×`;
           chip.onclick = () => {
             const idx = selectedUploads.findIndex((x) => Number(x.id) === Number(up.id));
             if (idx >= 0) selectedUploads.splice(idx, 1);
@@ -417,18 +417,18 @@ function renderMessage(m){
           };
           uploadChips.appendChild(chip);
         });
-        for (const file of pendingFiles) {
+        pendingFiles.forEach((file, idx) => {
           const chip = document.createElement('button');
           chip.type = 'button';
           chip.className = 'ghost';
-          chip.textContent = `${file.name || 'new-file'} ×`;
+          chip.textContent = `${file.name || 'new-file'} (${selectedUploads.length + idx + 1}) ×`;
           chip.onclick = () => {
-            const idx = pendingFiles.indexOf(file);
-            if (idx >= 0) pendingFiles.splice(idx, 1);
+            const removeIdx = pendingFiles.indexOf(file);
+            if (removeIdx >= 0) pendingFiles.splice(removeIdx, 1);
             redrawUploadChips();
           };
           uploadChips.appendChild(chip);
-        }
+        });
       };
 
       const addUploadBtn = document.createElement('button');
@@ -465,9 +465,18 @@ function renderMessage(m){
 
       const submitEdit = async () => {
         const next = ta.value;
-        if (!next.trim()) return;
+        const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
+        const hasPendingFiles = pendingFiles.length > 0;
+        const hasUploadChanges = hasPendingFiles || uploadIds.length !== initialUploadIds.length || uploadIds.some((id, idx) => id != initialUploadIds[idx]);
+        if (!next.trim() && uploadIds.length === 0 && !hasPendingFiles) {
+          showError('Message cannot be empty. Add text or attach a file.');
+          return;
+        }
+        if (!hasUploadChanges && next === (m.body || '')) {
+          restore();
+          return;
+        }
         try {
-          const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
           for (const file of pendingFiles) {
             const up = await uploadAttachmentFile(file);
             if (up.uploadId) uploadIds.push(Number(up.uploadId));
