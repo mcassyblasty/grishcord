@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grishcord</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#000;--text:#fff;--panel:#111;--muted:#888;--line:#333;--accent:#5a67d8;--danger:#ef4444;--ok:#22c55e;color-scheme:dark}
+    body.discord{--bg:#313338;--text:#f2f3f5;--panel:#2b2d31;--line:#42444b;--muted:#b5bac1;--accent:#5865f2;--danger:#f87171;--ok:#4ade80}
+    *{box-sizing:border-box}
+    html,body{height:100%;overflow:hidden}
+    body{margin:0;font-family:Inter,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100svh}
+    *::-webkit-scrollbar{width:10px;height:10px}
+    *::-webkit-scrollbar-track{background:transparent}
+    *::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#5f6690,#3f4566);border-radius:12px;border:2px solid transparent;background-clip:padding-box}
+    *::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#7a82bb,#4f5680)}
+    *{scrollbar-width:thin;scrollbar-color:#50567e transparent}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:.58rem .8rem;background:#0002;color:var(--text)}
+    button:hover{border-color:var(--accent)}
+    button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+    button.ghost{background:transparent;color:var(--text)}
+    button:disabled{opacity:.62;cursor:not-allowed}
+    button.channel{width:100%;text-align:left;border-radius:8px;padding:.48rem .55rem;background:transparent}
+    button.channel.active{border-color:var(--line);background:#ffffff14}
+    .sectionHead{display:flex;align-items:center;justify-content:space-between;gap:.35rem}
+    .sectionHead .small{font-weight:600;letter-spacing:.08em}
+    .sectionAddBtn,.chanMenuBtn,.chanDragHandle,.chanToggleBtn{padding:.18rem .45rem;min-width:28px;min-height:26px;line-height:1;border-radius:7px}
+    .chanRow{display:flex;align-items:center;gap:.3rem;position:relative}
+    .chanRow .channel{flex:1}
+    .chanRow.dragging{opacity:.55}
+    .chanRow.dropTarget{outline:1px dashed var(--accent);border-radius:8px}
+    input,select,textarea{padding:.6rem;border:1px solid var(--line);border-radius:10px;background:#0002;color:var(--text)}
+    select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:2rem}
+    select option{background:var(--panel);color:var(--text)}
+    .hidden{display:none!important}
+    .small{font-size:.85rem;color:var(--muted)}
+    #meLabel,#versionLabel{white-space:nowrap}
+    .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .adminUserRow{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--line);border-radius:10px;margin-bottom:.45rem}
+    .adminUserMeta{font-weight:600;line-height:1.3;min-width:0;word-break:break-word}
+    .adminUserActions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}
+
+    .top{display:flex;justify-content:space-between;gap:.6rem;padding:.5rem;border-bottom:1px solid var(--line);align-items:center;position:relative;min-height:52px}
+    .topLeft{display:flex;align-items:center;gap:.5rem;min-width:0}
+    .titleBlock{display:flex;flex-direction:column;min-width:0}
+    .titleRow{display:flex;align-items:center;gap:.45rem;min-width:0}
+    .topMeta{display:flex;gap:.35rem;min-width:0}
+    .topRight{display:flex;align-items:center;gap:.45rem;flex-shrink:0}
+    .spacer{display:none}
+    .menu{position:relative}
+    .notifBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 .35rem;border-radius:999px;background:var(--danger);color:#fff;font-size:.72rem;margin-left:.25rem}
+    .notifList{display:flex;flex-direction:column;gap:.35rem;max-height:56vh;overflow:auto}
+    .notifItem{display:flex;flex-direction:column;gap:.12rem;align-items:flex-start;text-align:left;padding:.45rem .5rem;border-radius:8px}
+    .notifItem .small{line-height:1.2}
+    .menuCard{position:absolute;right:0;top:110%;min-width:240px;max-width:min(360px,calc(100vw - 1rem));background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem;z-index:40;display:flex;flex-direction:column;gap:.4rem}
+    .toastStack{position:fixed;left:50%;top:.8rem;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:.45rem;z-index:80;pointer-events:none}
+    .toast{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem .65rem;max-width:min(420px,calc(100vw - 1.2rem));box-shadow:0 10px 28px #0008}
+    .toast.error{border-color:var(--danger)}
+    .toast.ok{border-color:var(--ok)}
+    .uiModalInput{width:100%;margin-top:.45rem}
+
+    .authWrap{padding:1rem;max-width:520px;margin:1rem auto}
+    .authCard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem}
+    .authCard h2{margin-top:0}
+    .authForm{display:flex;flex-direction:column;gap:.6rem}
+    .authToggle{margin-top:.75rem;display:flex;flex-direction:column;gap:.45rem}
+    .notice{margin-top:.75rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:10px;min-height:2.2rem;display:flex;align-items:center}
+    .notice.error{border-color:var(--danger);color:var(--danger)}
+    .notice.ok{border-color:var(--ok);color:var(--ok)}
+
+    .app{display:grid;grid-template-columns:260px 1fr;min-height:0;flex:1}
+    .sidebar{background:var(--panel);padding:1rem;overflow:auto;border-right:1px solid var(--line);min-height:0}
+    .chat{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+    .chatHeader{padding:.7rem 1rem;border-bottom:1px solid var(--line)}
+    .msgs{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem;min-height:0}
+    .msg{padding:.5rem;border:1px solid var(--line);border-radius:8px;position:relative}
+    .msg.mentionPing{border-color:#f59e0b;background:rgba(245,158,11,.12)}
+    .msg.flash{outline:2px solid var(--accent);box-shadow:0 0 0 2px #0006}
+    .meta{font-size:.8rem;color:var(--muted)}
+    .empty{padding:1rem;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
+    .composer{padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg);z-index:4}
+    .composer textarea{flex:1;min-height:42px;height:42px;max-height:42px;resize:none;line-height:1.25;padding:.55rem .6rem}
+    .replyPreview{margin:.35rem .75rem 0;padding:.45rem .55rem;border:1px dashed var(--line);border-radius:8px;font-size:.85rem;color:var(--muted)}
+    .msgTools{display:flex;gap:.2rem;position:absolute;top:.3rem;right:.3rem}
+    .msgTools button{padding:.18rem .35rem;min-width:26px;min-height:24px;line-height:1;font-size:.82rem;border-radius:7px}
+    .pendingImage{margin:.35rem .75rem 0;padding:.45rem;border:1px dashed var(--line);border-radius:8px;display:flex;gap:.5rem;align-items:center}
+    .pendingImage img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+    .msgImage{max-width:min(360px,86vw);max-height:280px;width:auto;height:auto;border-radius:10px;border:1px solid var(--line);margin-top:.35rem;cursor:pointer;object-fit:contain;background:#0004}
+    .imageLightbox{position:fixed;inset:0;background:#000c;z-index:130;display:flex;align-items:center;justify-content:center;padding:1rem}
+    .imageLightbox img{max-width:min(1200px,94vw);max-height:88vh;border-radius:12px;border:1px solid var(--line);background:#000}
+    .stack{display:flex;flex-direction:column;gap:.5rem;margin:.75rem 0}
+    #dmSearchInput{width:100%;margin-top:.35rem;text-align:left}
+    .card{border:1px solid var(--line);border-radius:8px;padding:.6rem}
+    .linkbox{word-break:break-all;padding:.45rem;border:1px dashed var(--line);border-radius:8px}
+    .drawerBtn{display:none}
+
+    .overlay{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:100}
+    .modal{width:min(720px,95vw);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
+
+    @media (max-width:960px){
+      .top{padding:.4rem .45rem;gap:.45rem}
+      .topLeft{gap:.4rem;min-width:0;flex:1}
+      .titleRow strong{font-size:1rem;line-height:1.1}
+      .topMeta{gap:.28rem}
+      #meLabel{max-width:38vw;overflow:hidden;text-overflow:ellipsis;font-size:.78rem}
+      #versionLabel{font-size:.74rem}
+      #settingsBtn,#notifBtn{padding:.42rem .5rem;font-size:.8rem;white-space:nowrap}
+      .app{grid-template-columns:1fr}
+      .sidebar{display:none}
+      .drawerBtn{display:inline-block;padding:.42rem .5rem}
+      body.showSidebar .app{position:relative}
+      body.showSidebar .sidebar{display:block;position:absolute;inset:0 auto 0 0;width:min(86vw,320px);z-index:60;height:100%}
+      .chat{min-height:0}
+      .msgs{padding:.65rem;padding-bottom:1rem}
+      .composer{padding:.55rem .55rem calc(.55rem + env(safe-area-inset-bottom));gap:.4rem}
+      .composer textarea{height:40px;min-height:40px;max-height:40px}
+      .menuCard{right:0;left:auto;max-width:calc(100vw - .75rem)}
+      #notifBtn .notifText{display:none}
+      #notifBtn::before{content:"🔔"}
+      .msgTools{top:.2rem;right:.2rem}
+      .sectionAddBtn,.chanMenuBtn{min-width:26px;min-height:24px;padding:.12rem .35rem}
+    }
+    @media (max-width:700px) and (orientation:portrait){
+      .top{padding:.35rem .4rem;gap:.35rem}
+      .topLeft{align-items:flex-start}
+      .titleBlock{gap:.12rem}
+      .topMeta{font-size:.72rem}
+      #versionLabel{display:none}
+      #settingsBtn{font-size:.76rem;padding:.38rem .46rem}
+      #notifBtn{font-size:.76rem;padding:.38rem .46rem}
+      .chatHeader{padding:.6rem .75rem}
+      .msgs{padding:.5rem}
+      .composer{padding:.5rem .5rem calc(.5rem + env(safe-area-inset-bottom));}
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="topLeft">
+      <button class="drawerBtn" id="drawerBtn">☰</button>
+      <div class="titleBlock">
+        <div class="titleRow"><strong>Grishcord</strong></div>
+        <div class="topMeta"><span class="small" id="meLabel">Not logged in</span><span class="small" id="versionLabel">v0.0.0</span></div>
+      </div>
+    </div>
+    <div class="topRight">
+
+    <div class="menu hidden" id="notifMenuWrap">
+      <button id="notifBtn" class="ghost"><span class="notifText">Notifications</span> <span id="notifBadge" class="notifBadge hidden">0</span></button>
+      <div class="menuCard hidden" id="notifMenu">
+        <div class="row" style="justify-content:space-between">
+          <div class="small">Recent DMs & Pings</div>
+          <button id="notifSoundToggleBtn" class="ghost" type="button">Sounds: On</button>
+        </div>
+        <div id="notifList" class="notifList small"></div>
+      </div>
+    </div>
+
+    <div class="menu hidden" id="settingsMenuWrap">
+      <button id="settingsBtn" class="ghost">Settings ⚙</button>
+      <div class="menuCard hidden" id="settingsMenu">
+        <div class="small">Appearance & Session</div>
+        <div class="card" style="margin:.2rem 0">
+          <div class="small" style="margin-bottom:.35rem">Account</div>
+          <input id="accountDisplayName" placeholder="display name">
+          <div class="row" style="margin-top:.35rem">
+            <input id="accountDisplayColor" type="color" value="#ffffff" style="width:42px;padding:0;height:34px">
+            <input id="accountDisplayColorHex" placeholder="#FFFFFF" maxlength="7" style="max-width:110px">
+          </div>
+          <button id="saveAccountBtn" style="margin-top:.45rem">Save Account</button>
+        </div>
+        <button id="themeBtn">Toggle Theme</button>
+        <button id="openAdminBtn" class="hidden">Admin Settings</button>
+        <button id="logoutBtn">Logout</button>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div id="authView" class="authWrap">
+    <div class="authCard">
+      <h2>Login</h2>
+      <form id="loginForm" class="authForm">
+        <input id="loginUser" placeholder="username" autocomplete="username" required>
+        <input id="loginPass" type="password" placeholder="password" autocomplete="current-password" required>
+        <button id="loginBtn" class="primary" type="submit">Login</button>
+      </form>
+
+      <div class="authToggle">
+        <label for="authActionSelect" class="small">Need help signing in?</label>
+        <select id="authActionSelect" aria-label="Authentication actions">
+          <option value="none" selected>Choose an option…</option>
+          <option value="register">Need an invite? Register</option>
+          <option value="recovery">Need password recovery?</option>
+        </select>
+
+        <div id="registerPanel" class="hidden" style="margin-top:.35rem">
+          <form id="registerForm" class="authForm">
+            <input id="regInvite" placeholder="invite token" required>
+            <input id="regUser" placeholder="username" required>
+            <input id="regDisplay" placeholder="display name" required>
+            <input id="regPass" type="password" placeholder="password" required>
+            <button id="regBtn" class="primary" type="submit">Register</button>
+          </form>
+        </div>
+
+        <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
+          <form id="redeemForm" class="authForm">
+            <input id="recoverToken" placeholder="recovery token" required>
+            <button id="redeemBtn" class="primary" type="submit">Redeem Token</button>
+          </form>
+          <form id="resetForm" class="authForm" style="margin-top:.5rem">
+            <input id="newPass" type="password" placeholder="new password" required>
+            <button id="resetBtn" class="primary" type="submit">Reset Password</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="authMsg" class="notice small hidden" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="row" style="margin-bottom:.65rem">
+        <button id="dmViewBtn" class="channel">DMs</button>
+        <button id="serverViewBtn" class="channel active">Server</button>
+      </div>
+
+      <div id="serverSections">
+        <div id="textHeader" class="sectionHead"><div class="small">TEXT CHANNELS</div><button id="addTextChannelBtn" class="ghost sectionAddBtn hidden" title="Add text channel">＋</button></div>
+        <div class="stack" id="channelList"></div>
+        <div id="voiceSpacer" style="height:.45rem"></div>
+        <div id="voiceHeader" class="sectionHead"><div class="small">VOICE CHANNELS</div><button id="addVoiceChannelBtn" class="ghost sectionAddBtn hidden" title="Add voice channel">＋</button></div>
+        <div class="stack" id="voiceList"></div>
+      </div>
+
+      <div id="dmSections" class="hidden">
+        <div class="small" style="letter-spacing:.08em;font-weight:600">DIRECT MESSAGES</div>
+        <input id="dmSearchInput" placeholder="Search DMs" aria-label="Search DMs">
+        <div class="stack" id="dmList"></div>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <div class="chatHeader" id="chatHeader"># general</div>
+      <div class="msgs" id="msgs"></div>
+      <div id="replyPreview" class="replyPreview hidden"></div>
+      <div id="pendingImage" class="pendingImage hidden"></div>
+      <div id="mentionHint" class="small hidden" style="padding:0 .75rem .35rem"></div>
+      <form id="composerForm" class="composer"><button id="attachBtn" type="button" title="Attach image or .zip file">+</button><input id="attachFile" type="file" accept="image/*,.zip,application/zip" class="hidden"><textarea id="msgInput" maxlength="10000" placeholder="Plain-text message"></textarea><button id="sendBtn" class="primary" type="submit">Send</button></form>
+    </main>
+  </div>
+
+  <div id="imageLightbox" class="imageLightbox hidden"><img id="lightboxImg" alt="Full-resolution image"></div>
+
+  <div id="adminOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Admin Settings</h3><button id="closeAdminBtn">Close</button></div>
+      <div class="small">Invite generation, recovery generation, anti-spam, bitrate, and account freeze.</div>
+      <div class="stack">
+        <div class="card">
+          <h4>Admin Mode</h4>
+          <div class="row"><label><input id="adminModeToggle" type="checkbox"> Enable moderation/editor mode</label></div>
+          <div class="small">When enabled, message delete controls and channel editor are visible in-app.</div>
+        </div>
+        <div class="card">
+          <h4>Create Invite Key</h4>
+          <div class="row"><button id="createInviteBtn">Generate</button></div>
+          <div id="inviteOut" class="linkbox small">(key will appear here)</div>
+        </div>
+        <div class="card">
+          <h4>Generate Recovery Key</h4>
+          <div class="row"><input id="recoveryUser" placeholder="username"><button id="genRecoveryBtn">Generate</button></div>
+          <div id="recoveryOut" class="linkbox small">(key will appear here)</div>
+        </div>
+        <div class="card">
+          <h4>Anti-Spam + Voice Bitrate</h4>
+          <div class="row"><label>Level</label><select id="spamLevel"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
+          <div class="small" id="spamEffective"></div>
+          <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
+          <div class="row"><label><input id="voiceEnabled" type="checkbox" checked> Enable voice channels</label></div>
+          <button id="saveSettingsBtn">Save Settings</button>
+        </div>
+        <div class="card"><h4>Users (admin/freeze/delete)</h4><div id="userList" class="small"></div></div>
+        <div class="card hidden" id="channelAdminCard">
+          <h4>Channel Editor</h4>
+          <div class="row">
+            <input id="newChannelName" placeholder="channel name">
+            <select id="newChannelKind"><option value="text">text</option><option value="voice">voice</option></select>
+            <button id="addChannelBtn">Add</button>
+          </div>
+          <div id="channelAdminList" class="small"></div>
+          <div class="small" style="margin-top:.35rem">Hide/Unhide toggles are applied instantly for everyone.</div>
+        </div>
+        <div class="card">
+          <h4>Invites Export</h4>
+          <div class="small">Download a complete CSV export of invite records.</div>
+          <button id="downloadInvitesBtn" style="margin-top:.45rem">Download Invites CSV</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="toastStack" class="toastStack"></div>
+
+  <div id="uiPromptOverlay" class="overlay hidden">
+    <div class="modal">
+      <h3 id="uiPromptTitle" style="margin-top:0">Confirm</h3>
+      <div id="uiPromptText" class="small"></div>
+      <input id="uiPromptInput" class="uiModalInput hidden" placeholder="">
+      <div class="row" style="justify-content:flex-end;margin-top:.65rem">
+        <button id="uiPromptCancelBtn" class="ghost" type="button">Cancel</button>
+        <button id="uiPromptOkBtn" class="primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
+<script src="/app.js"></script>
+</body>
+</html>
