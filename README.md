@@ -47,3 +47,7 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 ## Upload limits
 - Supports image attachments and `.zip` attachments.
 - Default backend upload cap is 100MB via `MAX_UPLOAD_BYTES` in `.env`.
+
+
+## Cloudflare / Internet edge note
+- If you use Cloudflare proxy and see **522**, the edge cannot reach your origin on 80/443. Ensure host firewall allows inbound TCP 80/443, router forwards 80/443 to this host, and Cloudflare SSL mode is **Full (strict)** once certs are issued.

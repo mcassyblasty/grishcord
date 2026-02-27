@@ -54,3 +54,12 @@ A retention sweeper runs automatically (default every 2 minutes). If `/mnt/grish
 - Set `PUBLIC_BASE_URL` and `CORS_ORIGINS` to the matching `https://` origin.
 - Ensure ports 80/443 are forwarded to this host and DNS A/AAAA records point here.
 - Then run `./scripts/grishcordctl.sh update-start`; Caddy will automatically obtain and renew TLS certificates.
+
+
+## Troubleshooting Cloudflare 522
+- `522` means Cloudflare cannot open a TCP connection to your origin.
+- Confirm host firewall/security group allows inbound TCP `80` and `443`.
+- Confirm router/NAT forwards TCP `80/443` to the Grishcord host.
+- Confirm DNS A/AAAA for `CADDY_SITE_ADDRESS` points to the correct public IP.
+- In Cloudflare, use SSL mode **Full (strict)** after certificates are live.
+- Run `./scripts/grishcordctl.sh logs` and verify Caddy is up and serving on both HTTP/HTTPS.

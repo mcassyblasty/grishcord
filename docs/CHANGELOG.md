@@ -4,6 +4,12 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.2] - 2026-02-26
+### Fixed
+- Hardened HTTPS runtime behavior for internet deployments by splitting Caddy into explicit HTTP redirect + HTTPS proxy site blocks for `CADDY_SITE_ADDRESS`.
+- Added HTTPS readiness verification in `grishcordctl` (`update-start`/`start`/`restart`) so failed TLS routes are surfaced immediately.
+- Added Cloudflare 522 troubleshooting guidance in docs and README for edge-to-origin connectivity issues.
+
 ## [1.0.1] - 2026-02-26
 ### Fixed
 - Enabled full automatic HTTPS in Caddy by switching to hostname-based site addressing with ACME certificate provisioning.

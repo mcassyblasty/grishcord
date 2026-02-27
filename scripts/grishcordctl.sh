@@ -88,6 +88,33 @@ get_lan_ip() {
   printf '%s' "$ip"
 }
 
+
+public_base_url() {
+  local env_file="$APP_DIR_REAL/.env"
+  [[ -f "$env_file" ]] || return 0
+  awk -F= '/^PUBLIC_BASE_URL=/{print substr($0,index($0,"=")+1)}' "$env_file" | tail -n 1 | sed 's/^"//; s/"$//'
+}
+
+public_base_host() {
+  local base
+  base="$(public_base_url || true)"
+  [[ -n "$base" ]] || return 0
+  printf '%s' "$base" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#:.*$##'
+}
+
+verify_local_https_route() {
+  local base host
+  base="$(public_base_url || true)"
+  [[ "$base" == https://* ]] || return 0
+  host="$(public_base_host || true)"
+  [[ -n "$host" ]] || return 0
+  local caddy_https_port
+  caddy_https_port="$(compose_cmd port caddy 443 2>/dev/null || true)"
+  caddy_https_port="${caddy_https_port##*:}"
+  [[ -n "$caddy_https_port" ]] || caddy_https_port="443"
+  wait_for_http "https://$host:$caddy_https_port/api/version" 180 "--resolve" "$host:$caddy_https_port:127.0.0.1" "-k"
+}
+
 get_caddy_port() {
   local mapping
   mapping="$(compose_cmd port caddy 80 2>/dev/null || true)"
@@ -211,12 +238,14 @@ wait_for_service() {
 wait_for_http() {
   local url="$1"
   local timeout_s="$2"
+  shift 2
+  local extra=("$@")
   local start now elapsed
   start="$(date +%s)"
   while true; do
     now="$(date +%s)"
     elapsed=$(( now - start ))
-    if curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
+    if curl -fsS --max-time 3 "${extra[@]}" "$url" >/dev/null 2>&1; then
       printf '\n'
       log "HTTP ready: $url"
       return 0
@@ -233,10 +262,14 @@ wait_for_http() {
 
 show_status() {
   compose_cmd ps
-  local lan_ip caddy_port
+  local lan_ip caddy_port base
   lan_ip="$(get_lan_ip)"
   caddy_port="$(get_caddy_port)"
+  base="$(public_base_url || true)"
   log "LAN URL: http://$lan_ip:$caddy_port/"
+  if [[ "$base" == https://* ]]; then
+    log "Public URL (HTTPS): $base"
+  fi
 }
 
 show_logs() {
@@ -254,6 +287,7 @@ start_stack() {
   wait_for_service frontend 180
   wait_for_service caddy 180
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
+  verify_local_https_route
   show_status
 }
 
@@ -270,6 +304,7 @@ update_start_stack() {
   wait_for_service frontend 180
   wait_for_service caddy 180
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
+  verify_local_https_route
   show_status
 }
 
@@ -280,6 +315,7 @@ restart_stack() {
   wait_for_service frontend 120
   wait_for_service caddy 120
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
+  verify_local_https_route
   show_status
 }
 
