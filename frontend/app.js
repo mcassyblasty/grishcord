@@ -24,6 +24,7 @@ const state = {
   dmSearchQuery: '',
   notifications: [],
   unreadNotifications: 0,
+  browserNotificationPermission: 'unsupported',
   voiceIceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
   sounds: {
     messageReceived: null,
@@ -659,6 +660,66 @@ function messageMentionsMe(body) {
   return false;
 }
 
+
+function browserNotificationsSupported() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function updateBrowserNotifToggleLabel() {
+  const btn = $('notifBrowserEnableBtn');
+  if (!btn) return;
+  if (!browserNotificationsSupported()) {
+    state.browserNotificationPermission = 'unsupported';
+    btn.textContent = 'Browser Alerts: Unsupported';
+    btn.disabled = true;
+    return;
+  }
+  const perm = Notification.permission || 'default';
+  state.browserNotificationPermission = perm;
+  btn.disabled = false;
+  if (perm === 'granted') btn.textContent = 'Browser Alerts: On';
+  else if (perm === 'denied') btn.textContent = 'Browser Alerts: Blocked';
+  else btn.textContent = 'Browser Alerts: Enable';
+}
+
+async function requestBrowserNotificationPermission() {
+  if (!browserNotificationsSupported()) {
+    showError('Browser notifications are not supported on this browser.');
+    return;
+  }
+  const current = Notification.permission || 'default';
+  if (current === 'denied') {
+    showError('Browser notifications are blocked. Allow them in browser site settings.');
+    updateBrowserNotifToggleLabel();
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    state.browserNotificationPermission = perm;
+    updateBrowserNotifToggleLabel();
+    if (perm === 'granted') showToast('Browser notifications enabled.');
+    else showError('Browser notifications were not enabled.');
+  } catch {
+    showError('Failed to request browser notification permission.');
+  }
+}
+
+function pushBrowserNotification(n) {
+  if (!browserNotificationsSupported()) return;
+  if ((Notification.permission || 'default') !== 'granted') return;
+  try {
+    const notif = new Notification(String(n.title || 'Notification'), {
+      body: String(n.preview || ''),
+      tag: `grishcord-notif-${Number(n.id || Date.now())}`,
+      renotify: false
+    });
+    notif.onclick = () => {
+      window.focus();
+      notif.close();
+    };
+  } catch {}
+}
+
 function renderNotifications() {
   const badge = $('notifBadge');
   const list = $('notifList');
@@ -709,7 +770,10 @@ function upsertNotification(n, { markUnread = true } = {}) {
     preview: n.preview || ''
   };
   state.notifications = [item, ...state.notifications.filter((x) => Number(x.id) !== item.id)].slice(0, 60);
-  if (markUnread) state.unreadNotifications += 1;
+  if (markUnread) {
+    state.unreadNotifications += 1;
+    pushBrowserNotification(item);
+  }
   renderNotifications();
 }
 
@@ -1621,10 +1685,12 @@ async function boot(){
   applyTheme(localStorage.getItem('grishcord_theme') || 'oled');
   initSounds();
   await loadVersion();
+  updateBrowserNotifToggleLabel();
 
   $('drawerBtn').onclick = ()=>document.body.classList.toggle('showSidebar');
   $('notifBtn').onclick = ()=> {
     updateNotifSoundToggleLabel();
+    updateBrowserNotifToggleLabel();
     const menu = $('notifMenu');
     const willOpen = menu.classList.contains('hidden');
     menu.classList.toggle('hidden');
@@ -1634,6 +1700,7 @@ async function boot(){
       renderNotifications();
     }
   };
+  $('notifBrowserEnableBtn').onclick = requestBrowserNotificationPermission;
   $('notifSoundToggleBtn').onclick = async ()=> {
     if (!state.me) return;
     const next = !(state.me.notification_sounds_enabled === false);

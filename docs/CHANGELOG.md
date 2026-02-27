@@ -4,6 +4,14 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [0.3.50] - 2026-02-26
+### Added
+- Added browser notifications integration using the Web Notifications API with explicit permission prompt support from the Notifications menu.
+- Added a new Notifications menu toggle button (`Browser Alerts: Enable/On/Blocked`) to request and display notification permission status.
+
+### Changed
+- Realtime in-app notifications (DM/ping entries added to the notifications list) now also trigger browser notifications when permission is granted.
+
 ## [0.3.49] - 2026-02-26
 ### Fixed
 - Non-image attachment labels in messages now use display-order numbering (`Attached file 1`, `Attached file 2`, ...) instead of raw upload IDs.
