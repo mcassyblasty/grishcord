@@ -63,3 +63,8 @@ A retention sweeper runs automatically (default every 2 minutes). If `/mnt/grish
 - Confirm DNS A/AAAA for `CADDY_SITE_ADDRESS` points to the correct public IP.
 - In Cloudflare, use SSL mode **Full (strict)** after certificates are live.
 - Run `./scripts/grishcordctl.sh logs` and verify Caddy is up and serving on both HTTP/HTTPS.
+
+
+## LAN access behavior
+- Requests to the configured public hostname (`CADDY_SITE_ADDRESS`) on port 80 are redirected to HTTPS.
+- Direct LAN/IP requests (e.g., `http://192.168.x.x`) are served over HTTP without forced redirect, so local testing remains functional.

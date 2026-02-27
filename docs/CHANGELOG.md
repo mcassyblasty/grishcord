@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.3] - 2026-02-26
+### Fixed
+- Fixed invalid redirect behavior on LAN/IP access by serving generic HTTP traffic directly and only redirecting the configured public hostname to HTTPS.
+- Kept automatic HTTPS for `CADDY_SITE_ADDRESS` while preserving local HTTP usability (`http://LAN_IP`).
+
 ## [1.0.2] - 2026-02-26
 ### Fixed
 - Hardened HTTPS runtime behavior for internet deployments by splitting Caddy into explicit HTTP redirect + HTTPS proxy site blocks for `CADDY_SITE_ADDRESS`.
