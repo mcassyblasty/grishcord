@@ -4,6 +4,12 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.1] - 2026-02-26
+### Fixed
+- Enabled full automatic HTTPS in Caddy by switching to hostname-based site addressing with ACME certificate provisioning.
+- Added `CADDY_SITE_ADDRESS` environment wiring in Compose and docs so `update-start` can redeploy HTTPS cleanly.
+- Added `grishcordctl` HTTPS preflight validation to fail fast on missing/invalid HTTPS host configuration.
+
 ## [1.0.0] - 2026-02-26
 ### Added
 - Channel announcement-only mode: admins can toggle channels so only admins can post while all users can still read messages.

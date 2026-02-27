@@ -47,6 +47,8 @@ services:
 
   caddy:
     image: caddy:2.8
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS}
     ports:
       - "80:80"
       - "443:443"

@@ -59,6 +59,28 @@ supports_compose_wait() {
   compose_cmd up --help 2>/dev/null | grep -q -- '--wait'
 }
 
+
+validate_https_env() {
+  local env_file="$APP_DIR_REAL/.env"
+  [[ -f "$env_file" ]] || return 0
+  local public_base caddy_site
+  public_base="$(awk -F= '/^PUBLIC_BASE_URL=/{print substr($0,index($0,"=")+1)}' "$env_file" | tail -n 1)"
+  caddy_site="$(awk -F= '/^CADDY_SITE_ADDRESS=/{print substr($0,index($0,"=")+1)}' "$env_file" | tail -n 1)"
+  public_base="${public_base%\"}"; public_base="${public_base#\"}"
+  caddy_site="${caddy_site%\"}"; caddy_site="${caddy_site#\"}"
+  if [[ "$public_base" == https://* ]]; then
+    if [[ -z "$caddy_site" ]]; then
+      err "HTTPS preflight failed: CADDY_SITE_ADDRESS is missing in .env while PUBLIC_BASE_URL is https."
+      err "Set CADDY_SITE_ADDRESS to your DNS host (example: grishcord.example.com)."
+      exit 1
+    fi
+    if [[ "$caddy_site" == *"://"* || "$caddy_site" == */* ]]; then
+      err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be hostname only (no scheme/path)."
+      exit 1
+    fi
+  fi
+}
+
 get_lan_ip() {
   local ip
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -290,6 +312,7 @@ main() {
 
   ensure_docker_access
   require_bin curl
+  validate_https_env
 
   case "$cmd" in
     start) start_stack ;;
