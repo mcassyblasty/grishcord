@@ -397,6 +397,7 @@ function renderMessage(m){
       uploadEditor.style.marginTop = '.4rem';
 
       const selectedUploads = Array.isArray(m.uploads) ? m.uploads.map((u) => ({ ...u })) : [];
+      const initialUploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
       const pendingFiles = [];
       const uploadChips = document.createElement('div');
       uploadChips.className = 'row';
@@ -465,9 +466,18 @@ function renderMessage(m){
 
       const submitEdit = async () => {
         const next = ta.value;
-        if (!next.trim()) return;
+        const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
+        const hasPendingFiles = pendingFiles.length > 0;
+        const hasUploadChanges = hasPendingFiles || uploadIds.length !== initialUploadIds.length || uploadIds.some((id, idx) => id != initialUploadIds[idx]);
+        if (!next.trim() && uploadIds.length === 0 && !hasPendingFiles) {
+          showError('Message cannot be empty. Add text or attach a file.');
+          return;
+        }
+        if (!hasUploadChanges && next === (m.body || '')) {
+          restore();
+          return;
+        }
         try {
-          const uploadIds = selectedUploads.map((u) => Number(u.id)).filter((v) => Number.isFinite(v));
           for (const file of pendingFiles) {
             const up = await uploadAttachmentFile(file);
             if (up.uploadId) uploadIds.push(Number(up.uploadId));
