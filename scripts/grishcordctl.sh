@@ -68,14 +68,14 @@ validate_https_env() {
   caddy_site="$(awk -F= '/^CADDY_SITE_ADDRESS=/{print substr($0,index($0,"=")+1)}' "$env_file" | tail -n 1)"
   public_base="${public_base%\"}"; public_base="${public_base#\"}"
   caddy_site="${caddy_site%\"}"; caddy_site="${caddy_site#\"}"
+  if [[ -n "$caddy_site" && ( "$caddy_site" == *"://"* || "$caddy_site" == */* ) ]]; then
+    err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be hostname only (no scheme/path)."
+    exit 1
+  fi
   if [[ "$public_base" == https://* ]]; then
     if [[ -z "$caddy_site" ]]; then
       err "HTTPS preflight failed: CADDY_SITE_ADDRESS is missing in .env while PUBLIC_BASE_URL is https."
       err "Set CADDY_SITE_ADDRESS to your DNS host (example: grishcord.example.com)."
-      exit 1
-    fi
-    if [[ "$caddy_site" == *"://"* || "$caddy_site" == */* ]]; then
-      err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be hostname only (no scheme/path)."
       exit 1
     fi
   fi
