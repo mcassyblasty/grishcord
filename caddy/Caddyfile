@@ -7,7 +7,7 @@
   }
 
   @tls_host host {$CADDY_SITE_ADDRESS}
-  redir @tls_host https://{$CADDY_SITE_ADDRESS}{uri} 308
+  redir @tls_host https://{host}{uri} 308
 
   @api path /api/* /ws*
   reverse_proxy @api backend:3000
