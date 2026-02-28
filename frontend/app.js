@@ -36,6 +36,26 @@ const state = {
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
 
 function text(el, v){ el.textContent = v; }
+function renderMessageBodyWithLinks(el, raw) {
+  const textValue = String(raw || '');
+  el.textContent = '';
+  const urlRe = /(https?:\/\/[^\s<>'\"]+)/g;
+  let last = 0;
+  for (const m of textValue.matchAll(urlRe)) {
+    const i = m.index ?? 0;
+    if (i > last) el.appendChild(document.createTextNode(textValue.slice(last, i)));
+    const url = m[0];
+    const a = document.createElement('a');
+    a.href = url;
+    a.textContent = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'msgLink';
+    el.appendChild(a);
+    last = i + url.length;
+  }
+  if (last < textValue.length) el.appendChild(document.createTextNode(textValue.slice(last)));
+}
 function clearNotice(){ const n=$('authMsg'); n.classList.remove('error','ok'); n.classList.add('hidden'); text(n,''); }
 function setNotice(msg, kind='error'){ const n=$('authMsg'); n.classList.remove('hidden','error','ok'); if(kind) n.classList.add(kind); text(n,msg); }
 function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); $('notifMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); $('loginUser')?.focus(); }
@@ -359,12 +379,12 @@ function renderMessage(m){
     reply.textContent = `↪ ${(m.reply_body || '').slice(0,120)}`;
     wrap.appendChild(reply);
   }
-  body.textContent = short;
+  renderMessageBodyWithLinks(body, short);
   wrap.append(meta, body);
   wrap.style.paddingTop = '.8rem';
   if (full.length > 2000){
     const b = document.createElement('button'); b.textContent='Read more';
-    b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
+    b.onclick = () => { renderMessageBodyWithLinks(body, full.slice(0,10000)); b.remove(); };
     wrap.appendChild(b);
   }
   renderMessageUploads(wrap, m.uploads);
@@ -490,7 +510,7 @@ function renderMessage(m){
           const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next, uploadIds });
           m.body = r.body || next;
           m.uploads = Array.isArray(r.uploads) ? r.uploads : [];
-          body.textContent = m.body;
+          renderMessageBodyWithLinks(body, m.body);
           renderMessageUploads(wrap, m.uploads);
           restore();
         } catch (err) {
@@ -1934,12 +1954,15 @@ async function boot(){
     const btn = $('regBtn');
     setBusy(btn, true);
     try {
+      if ($('regPass').value !== $('regPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
       setNotice('Registered. Log in now.', 'ok');
       $('registerPanel').classList.add('hidden');
       $('authActionSelect').value = 'none';
+      $('regPassConfirm').value = '';
     } catch(err){
-      setNotice(`Register failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Register failed: passwords do not match.', 'error');
+      else setNotice(`Register failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 
@@ -1961,12 +1984,15 @@ async function boot(){
     const btn = $('resetBtn');
     setBusy(btn, true);
     try {
+      if ($('newPass').value !== $('newPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
       setNotice('Password reset complete.', 'ok');
       $('recoveryPanel').classList.add('hidden');
       $('authActionSelect').value = 'none';
+      $('newPassConfirm').value = '';
     } catch(err){
-      setNotice(`Reset failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Reset failed: passwords do not match.', 'error');
+      else setNotice(`Reset failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 
