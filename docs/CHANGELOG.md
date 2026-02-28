@@ -4,6 +4,10 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.8] - 2026-02-28
+### Fixed
+- Fixed internet login failures caused by strict same-origin checks behind reverse proxy by enabling Express proxy trust (`app.set('trust proxy', 1)`), so `req.protocol` correctly reflects forwarded HTTPS.
+
 ## [1.0.7] - 2026-02-28
 ### Fixed
 - Restored dual HTTP/HTTPS Caddy routing so LAN HTTP remains stable while public-host automatic HTTPS stays enabled.
