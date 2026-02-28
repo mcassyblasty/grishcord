@@ -4,6 +4,21 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.6] - 2026-02-28
+### Fixed
+- Prevented HTTPS regressions by enforcing hostname-based Caddy site configuration and blocking `:80`-only Caddyfiles during HTTPS preflight.
+- Hardened deploy-time env handling so `CADDY_SITE_ADDRESS` is required for compose and can be derived from `PUBLIC_BASE_URL` when omitted in `.env`.
+- Reinforced Cloudflare HTTPS guidance for origin certificate issuance and Full (strict) mode.
+
+## [1.0.5] - 2026-02-28
+### Changed
+- Bumped version tracking to `1.0.5` to align release numbering after missed increment steps during recent Caddy/compose updates.
+
+## [1.0.4] - 2026-02-28
+### Fixed
+- Restored Caddy automatic HTTPS by using a hostname-based site label instead of an HTTP-only `:80` site block.
+- Added persistent Caddy `/data` and `/config` volumes and tightened HTTPS preflight validation in `grishcordctl`.
+
 ## [1.0.3] - 2026-02-26
 ### Fixed
 - Fixed invalid redirect behavior on LAN/IP access by serving generic HTTP traffic directly and only redirecting the configured public hostname to HTTPS.
