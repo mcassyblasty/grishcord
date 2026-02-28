@@ -28,7 +28,11 @@ USAGE
 }
 
 docker_cmd() { "${DOCKER_PREFIX[@]}" "$DOCKER_BIN" "$@"; }
-compose_cmd() { docker_cmd compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"; }
+COMPOSE_ENV_FILE="$APP_DIR_REAL/.env"
+COMPOSE_ENV_ARGS=()
+[[ -f "$COMPOSE_ENV_FILE" ]] && COMPOSE_ENV_ARGS=(--env-file "$COMPOSE_ENV_FILE")
+
+compose_cmd() { docker_cmd compose --project-directory "$APP_DIR_REAL" "${COMPOSE_ENV_ARGS[@]}" -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"; }
 
 require_bin() {
   local bin="$1"
@@ -103,16 +107,11 @@ public_base_host() {
 }
 
 verify_local_https_route() {
-  local base host
+  local base
   base="$(public_base_url || true)"
   [[ "$base" == https://* ]] || return 0
-  host="$(public_base_host || true)"
-  [[ -n "$host" ]] || return 0
-  local caddy_https_port
-  caddy_https_port="$(compose_cmd port caddy 443 2>/dev/null || true)"
-  caddy_https_port="${caddy_https_port##*:}"
-  [[ -n "$caddy_https_port" ]] || caddy_https_port="443"
-  wait_for_http "https://$host:$caddy_https_port/api/version" 180 "--resolve" "$host:$caddy_https_port:127.0.0.1" "-k"
+  warn "PUBLIC_BASE_URL is HTTPS, but this stack is currently configured for LAN-first HTTP on :80. Skipping HTTPS verification."
+  return 0
 }
 
 get_caddy_port() {
@@ -276,6 +275,14 @@ show_logs() {
   compose_cmd logs --no-color --tail 200 caddy frontend backend
 }
 
+print_self_diagnosis() {
+  log "Self-check commands:"
+  log "  docker compose -p $PROJECT_NAME ps"
+  log "  docker compose -p $PROJECT_NAME logs --tail 50 caddy"
+  log "  ss -lntp | egrep ':(80|443)\b'"
+  log "  curl -v http://127.0.0.1/api/version"
+}
+
 start_stack() {
   if supports_compose_wait; then
     run_with_timer "compose up (build/start + wait)" compose_cmd up -d --build --remove-orphans --wait --wait-timeout 240
@@ -289,6 +296,7 @@ start_stack() {
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   verify_local_https_route
   show_status
+  print_self_diagnosis
 }
 
 update_start_stack() {
@@ -306,6 +314,7 @@ update_start_stack() {
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   verify_local_https_route
   show_status
+  print_self_diagnosis
 }
 
 restart_stack() {
@@ -317,6 +326,7 @@ restart_stack() {
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   verify_local_https_route
   show_status
+  print_self_diagnosis
 }
 
 doctor() {
@@ -331,6 +341,7 @@ doctor() {
   log "lan ip: $(get_lan_ip)"
   log "caddy port: $(get_caddy_port)"
   compose_cmd ps || true
+  print_self_diagnosis
 }
 
 stop_stack() {
@@ -355,7 +366,7 @@ main() {
     restart) restart_stack ;;
     stop) stop_stack ;;
     update-start) update_start_stack ;;
-    status) show_status ;;
+    status) show_status; print_self_diagnosis ;;
     logs) show_logs ;;
     doctor) doctor ;;
     *) err "unknown command: $cmd"; usage; exit 2 ;;
