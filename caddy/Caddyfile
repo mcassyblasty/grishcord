@@ -1,4 +1,4 @@
-{$CADDY_SITE_ADDRESS} {
+:80 {
   encode zstd gzip
   header {
     Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
@@ -6,6 +6,30 @@
     Referrer-Policy no-referrer
   }
 
+  @public_host host {$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com}
+  redir @public_host https://{$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com}{uri} 308
+
+  @api path /api/* /ws*
+  reverse_proxy @api backend:3000
+  reverse_proxy frontend:80
+}
+
+https://{$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com} {
+  encode zstd gzip
+  header {
+    Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+  }
+
+  @api path /api/* /ws*
+  reverse_proxy @api backend:3000
+  reverse_proxy frontend:80
+}
+
+:443 {
+  tls internal
+  encode zstd gzip
   @api path /api/* /ws*
   reverse_proxy @api backend:3000
   reverse_proxy frontend:80

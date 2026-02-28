@@ -108,8 +108,9 @@ validate_https_env() {
       err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be your real DNS host, not localhost/127.0.0.1."
       exit 1
     fi
-    if rg -n '^:80\s*\{' "$APP_DIR_REAL/caddy/Caddyfile" >/dev/null 2>&1; then
-      err "HTTPS preflight failed: caddy/Caddyfile is configured as :80-only. Use a hostname site label ({$CADDY_SITE_ADDRESS}) for automatic HTTPS."
+    if ! rg -n '^\s*(https://)?\{\$CADDY_SITE_ADDRESS' "$APP_DIR_REAL/caddy/Caddyfile" >/dev/null 2>&1; then
+      err "HTTPS preflight failed: caddy/Caddyfile is missing a hostname-based site for CADDY_SITE_ADDRESS."
+      err "Add a site like https://{$CADDY_SITE_ADDRESS} { ... } to keep automatic HTTPS enabled."
       exit 1
     fi
   fi

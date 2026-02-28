@@ -4,6 +4,12 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.7] - 2026-02-28
+### Fixed
+- Restored dual HTTP/HTTPS Caddy routing so LAN HTTP remains stable while public-host automatic HTTPS stays enabled.
+- Added a TLS fallback listener on `:443` (`tls internal`) to prevent `ERR_SSL_PROTOCOL_ERROR` on direct LAN-IP HTTPS probes.
+- Relaxed HTTPS preflight guard in `grishcordctl` to require a hostname-based Caddy site instead of rejecting any config that also includes `:80`.
+
 ## [1.0.6] - 2026-02-28
 ### Fixed
 - Prevented HTTPS regressions by enforcing hostname-based Caddy site configuration and blocking `:80`-only Caddyfiles during HTTPS preflight.
