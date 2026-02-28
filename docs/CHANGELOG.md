@@ -4,6 +4,11 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.9] - 2026-02-28
+### Fixed
+- Fixed `grishcordctl start` HTTPS preflight crash caused by unescaped `$CADDY_SITE_ADDRESS` in an error string under `set -u`.
+- Replaced hostname-site validation from `rg` to portable `grep -E` and broadened matching to support `{$CADDY_SITE_ADDRESS:default}` site labels.
+
 ## [1.0.8] - 2026-02-28
 ### Fixed
 - Fixed internet login failures caused by strict same-origin checks behind reverse proxy by enabling Express proxy trust (`app.set('trust proxy', 1)`), so `req.protocol` correctly reflects forwarded HTTPS.
