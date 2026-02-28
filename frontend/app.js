@@ -1934,12 +1934,15 @@ async function boot(){
     const btn = $('regBtn');
     setBusy(btn, true);
     try {
+      if ($('regPass').value !== $('regPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
       setNotice('Registered. Log in now.', 'ok');
       $('registerPanel').classList.add('hidden');
       $('authActionSelect').value = 'none';
+      $('regPassConfirm').value = '';
     } catch(err){
-      setNotice(`Register failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Register failed: passwords do not match.', 'error');
+      else setNotice(`Register failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 
@@ -1961,12 +1964,15 @@ async function boot(){
     const btn = $('resetBtn');
     setBusy(btn, true);
     try {
+      if ($('newPass').value !== $('newPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
       setNotice('Password reset complete.', 'ok');
       $('recoveryPanel').classList.add('hidden');
       $('authActionSelect').value = 'none';
+      $('newPassConfirm').value = '';
     } catch(err){
-      setNotice(`Reset failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Reset failed: passwords do not match.', 'error');
+      else setNotice(`Reset failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 
