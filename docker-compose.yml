@@ -48,12 +48,14 @@ services:
   caddy:
     image: caddy:2.8
     environment:
-      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-localhost}
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?Set CADDY_SITE_ADDRESS in .env (hostname only)}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -78,3 +80,7 @@ services:
       - "51000-51999:51000-51999/udp"
     volumes:
       - /mnt/grishcord/config/turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+volumes:
+  caddy_data:
+  caddy_config:

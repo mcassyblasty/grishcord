@@ -34,6 +34,24 @@ COMPOSE_ENV_ARGS=()
 
 compose_cmd() { docker_cmd compose --project-directory "$APP_DIR_REAL" "${COMPOSE_ENV_ARGS[@]}" -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"; }
 
+infer_and_export_caddy_site_from_public_base() {
+  local public_base caddy_site inferred
+  public_base="$(public_base_url || true)"
+  [[ "$public_base" == https://* ]] || return 0
+  caddy_site="$(awk -F= '/^CADDY_SITE_ADDRESS=/{print substr($0,index($0,"=")+1)}' "$COMPOSE_ENV_FILE" 2>/dev/null | tail -n 1 | sed 's/^"//; s/"$//' || true)"
+  if [[ -n "$caddy_site" ]]; then
+    return 0
+  fi
+  inferred="$(printf '%s' "$public_base" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#:.*$##')"
+  if [[ -z "$inferred" || "$inferred" == "localhost" || "$inferred" == "127.0.0.1" ]]; then
+    err "HTTPS preflight failed: unable to derive a valid CADDY_SITE_ADDRESS from PUBLIC_BASE_URL=$public_base"
+    err "Set CADDY_SITE_ADDRESS to your public DNS hostname in $COMPOSE_ENV_FILE."
+    exit 1
+  fi
+  export CADDY_SITE_ADDRESS="$inferred"
+  log "CADDY_SITE_ADDRESS missing in .env; derived from PUBLIC_BASE_URL host: $CADDY_SITE_ADDRESS"
+}
+
 require_bin() {
   local bin="$1"
   command -v "$bin" >/dev/null 2>&1 || { err "required binary missing: $bin"; exit 1; }
@@ -78,8 +96,20 @@ validate_https_env() {
   fi
   if [[ "$public_base" == https://* ]]; then
     if [[ -z "$caddy_site" ]]; then
-      err "HTTPS preflight failed: CADDY_SITE_ADDRESS is missing in .env while PUBLIC_BASE_URL is https."
-      err "Set CADDY_SITE_ADDRESS to your DNS host (example: grishcord.example.com)."
+      if [[ -n "${CADDY_SITE_ADDRESS:-}" ]]; then
+        caddy_site="$CADDY_SITE_ADDRESS"
+      else
+        err "HTTPS preflight failed: CADDY_SITE_ADDRESS is missing in .env while PUBLIC_BASE_URL is https."
+        err "Set CADDY_SITE_ADDRESS to your DNS host (example: grishcord.example.com)."
+        exit 1
+      fi
+    fi
+    if [[ "$caddy_site" == "localhost" || "$caddy_site" == "127.0.0.1" ]]; then
+      err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be your real DNS host, not localhost/127.0.0.1."
+      exit 1
+    fi
+    if rg -n '^:80\s*\{' "$APP_DIR_REAL/caddy/Caddyfile" >/dev/null 2>&1; then
+      err "HTTPS preflight failed: caddy/Caddyfile is configured as :80-only. Use a hostname site label ({$CADDY_SITE_ADDRESS}) for automatic HTTPS."
       exit 1
     fi
   fi
@@ -107,11 +137,15 @@ public_base_host() {
 }
 
 verify_local_https_route() {
-  local base
+  local base host caddy_https_port
   base="$(public_base_url || true)"
   [[ "$base" == https://* ]] || return 0
-  warn "PUBLIC_BASE_URL is HTTPS, but this stack is currently configured for LAN-first HTTP on :80. Skipping HTTPS verification."
-  return 0
+  host="$(public_base_host || true)"
+  [[ -n "$host" ]] || return 0
+  caddy_https_port="$(compose_cmd port caddy 443 2>/dev/null || true)"
+  caddy_https_port="${caddy_https_port##*:}"
+  [[ -n "$caddy_https_port" ]] || caddy_https_port="443"
+  wait_for_http "https://$host:$caddy_https_port/api/version" 180 "--resolve" "$host:$caddy_https_port:127.0.0.1" "-k"
 }
 
 get_caddy_port() {
@@ -278,9 +312,13 @@ show_logs() {
 print_self_diagnosis() {
   log "Self-check commands:"
   log "  docker compose -p $PROJECT_NAME ps"
-  log "  docker compose -p $PROJECT_NAME logs --tail 50 caddy"
+  log "  docker compose -p $PROJECT_NAME logs --tail 200 caddy"
   log "  ss -lntp | egrep ':(80|443)\b'"
   log "  curl -v http://127.0.0.1/api/version"
+  local probe_host
+  probe_host="${CADDY_SITE_ADDRESS:-$(public_base_host || true)}"
+  [[ -n "$probe_host" ]] || probe_host="grishcord.countgrishnackh.com"
+  log "  curl -vk --resolve ${probe_host}:443:127.0.0.1 https://${probe_host}/"
 }
 
 start_stack() {
@@ -359,6 +397,7 @@ main() {
 
   ensure_docker_access
   require_bin curl
+  infer_and_export_caddy_site_from_public_base
   validate_https_env
 
   case "$cmd" in
