@@ -36,7 +36,7 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ## Security-related environment notes
 - `PUBLIC_BASE_URL` should match your externally reachable app URL.
-- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://`) so Caddy can automatically provision TLS certificates.
+- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
 - Authentication and recovery endpoints are rate-limited server-side; repeated failures receive HTTP `429` with `Retry-After`.
 
