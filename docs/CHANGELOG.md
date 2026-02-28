@@ -4,6 +4,10 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.11] - 2026-02-28
+### Changed
+- Message text now linkifies `http://` and `https://` URLs as blue, clickable links that open in a new tab (`target="_blank"`, `rel="noopener noreferrer"`).
+
 ## [1.0.10] - 2026-02-28
 ### Changed
 - Added password confirmation fields for registration and password reset forms, with client-side mismatch validation before API calls.
