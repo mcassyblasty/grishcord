@@ -112,6 +112,10 @@ validate_https_env() {
       err "HTTPS preflight failed: caddy/Caddyfile is configured as :80-only. Use a hostname site label ({$CADDY_SITE_ADDRESS}) for automatic HTTPS."
       exit 1
     fi
+    if [[ "$caddy_site" == "localhost" || "$caddy_site" == "127.0.0.1" ]]; then
+      err "HTTPS preflight failed: CADDY_SITE_ADDRESS must be your real DNS host, not localhost/127.0.0.1."
+      exit 1
+    fi
   fi
 }
 
@@ -315,10 +319,7 @@ print_self_diagnosis() {
   log "  docker compose -p $PROJECT_NAME logs --tail 200 caddy"
   log "  ss -lntp | egrep ':(80|443)\b'"
   log "  curl -v http://127.0.0.1/api/version"
-  local probe_host
-  probe_host="${CADDY_SITE_ADDRESS:-$(public_base_host || true)}"
-  [[ -n "$probe_host" ]] || probe_host="grishcord.countgrishnackh.com"
-  log "  curl -vk --resolve ${probe_host}:443:127.0.0.1 https://${probe_host}/"
+  log "  curl -vk --resolve ${CADDY_SITE_ADDRESS:-grishcord.countgrishnackh.com}:443:127.0.0.1 https://${CADDY_SITE_ADDRESS:-grishcord.countgrishnackh.com}/"
 }
 
 start_stack() {

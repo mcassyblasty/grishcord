@@ -1,4 +1,4 @@
-{$CADDY_SITE_ADDRESS} {
+{$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com} {
   encode zstd gzip
   header {
     Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
