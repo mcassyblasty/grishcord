@@ -4,6 +4,10 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.10] - 2026-02-28
+### Changed
+- Added password confirmation fields for registration and password reset forms, with client-side mismatch validation before API calls.
+
 ## [1.0.9] - 2026-02-28
 ### Fixed
 - Fixed `grishcordctl start` HTTPS preflight crash caused by unescaped `$CADDY_SITE_ADDRESS` in an error string under `set -u`.
