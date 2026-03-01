@@ -4,6 +4,22 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.18] - 2026-02-28
+### Fixed
+- Improved mobile image attachment rendering with explicit responsive image sizing in chat messages and added a fallback link when image loading fails.
+
+## [1.0.17] - 2026-02-28
+### Changed
+- Added `@everyone` mention support: autocomplete now includes `@everyone`, mention highlighting treats it as a ping, and channel messages with `@everyone` create ping notifications for all other users.
+
+## [1.0.16] - 2026-02-28
+### Changed
+- Admin Users section now uses a dropdown selector in the same settings card location, with actions shown for the selected user to scale better with large user counts.
+
+## [1.0.15] - 2026-02-28
+### Fixed
+- Recovery flow now shows only the token redeem form initially; after a successful token redeem, the token form hides and reset-password fields appear.
+
 ## [1.0.14] - 2026-02-28
 ### Changed
 - Auth mode screens now preserve the core login-card layout while switching modes, with dynamic bottom action buttons that show alternative options (e.g., Register mode shows Login/Forgot password).
