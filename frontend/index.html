@@ -68,6 +68,9 @@
     .authCard h2{margin-top:0}
     .authForm{display:flex;flex-direction:column;gap:.6rem}
     .authToggle{margin-top:.75rem;display:flex;flex-direction:column;gap:.45rem}
+    .authModeBtns{display:flex;gap:.5rem}
+    .authModeBtn{flex:1}
+    .authModeBtn.active{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent)}
     .notice{margin-top:.75rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:10px;min-height:2.2rem;display:flex;align-items:center}
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
@@ -186,7 +189,7 @@
 
   <div id="authView" class="authWrap">
     <div class="authCard">
-      <h2>Login</h2>
+      <h2 id="authTitle">Login</h2>
       <form id="loginForm" class="authForm">
         <input id="loginUser" placeholder="username" autocomplete="username" required>
         <input id="loginPass" type="password" placeholder="password" autocomplete="current-password" required>
@@ -194,12 +197,11 @@
       </form>
 
       <div class="authToggle">
-        <label for="authActionSelect" class="small">Need help signing in?</label>
-        <select id="authActionSelect" aria-label="Authentication actions">
-          <option value="none" selected>Choose an option…</option>
-          <option value="register">Need an invite? Register</option>
-          <option value="recovery">Need password recovery?</option>
-        </select>
+        <div class="small">Need help signing in?</div>
+        <div class="authModeBtns">
+          <button id="authRegisterBtn" type="button" class="ghost authModeBtn">Register</button>
+          <button id="authRecoveryBtn" type="button" class="ghost authModeBtn">Forgot password</button>
+        </div>
 
         <div id="registerPanel" class="hidden" style="margin-top:.35rem">
           <form id="registerForm" class="authForm">

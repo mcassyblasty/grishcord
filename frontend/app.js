@@ -1930,10 +1930,25 @@ async function boot(){
   $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar('text');
   $('addVoiceChannelBtn').onclick = ()=> createChannelFromSidebar('voice');
 
-  $('authActionSelect').onchange = ()=> {
-    const v = $('authActionSelect').value;
-    $('registerPanel').classList.toggle('hidden', v !== 'register');
-    $('recoveryPanel').classList.toggle('hidden', v !== 'recovery');
+  const setAuthAuxMode = (mode = 'none') => {
+    const registerOpen = mode === 'register';
+    const recoveryOpen = mode === 'recovery';
+    const loginOpen = !registerOpen && !recoveryOpen;
+    $('loginForm').classList.toggle('hidden', !loginOpen);
+    $('registerPanel').classList.toggle('hidden', !registerOpen);
+    $('recoveryPanel').classList.toggle('hidden', !recoveryOpen);
+    $('authRegisterBtn')?.classList.toggle('active', registerOpen);
+    $('authRecoveryBtn')?.classList.toggle('active', recoveryOpen);
+    if ($('authTitle')) $('authTitle').textContent = registerOpen ? 'Register' : (recoveryOpen ? 'Recover Account' : 'Login');
+  };
+
+  $('authRegisterBtn').onclick = ()=> {
+    const isOpen = !$('registerPanel').classList.contains('hidden');
+    setAuthAuxMode(isOpen ? 'none' : 'register');
+  };
+  $('authRecoveryBtn').onclick = ()=> {
+    const isOpen = !$('recoveryPanel').classList.contains('hidden');
+    setAuthAuxMode(isOpen ? 'none' : 'recovery');
   };
 
   $('loginForm').onsubmit = async (e)=>{
@@ -1957,8 +1972,7 @@ async function boot(){
       if ($('regPass').value !== $('regPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
       setNotice('Registered. Log in now.', 'ok');
-      $('registerPanel').classList.add('hidden');
-      $('authActionSelect').value = 'none';
+      setAuthAuxMode('none');
       $('regPassConfirm').value = '';
     } catch(err){
       if (String(err?.message || '') === 'password_mismatch') setNotice('Register failed: passwords do not match.', 'error');
@@ -1987,8 +2001,7 @@ async function boot(){
       if ($('newPass').value !== $('newPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
       setNotice('Password reset complete.', 'ok');
-      $('recoveryPanel').classList.add('hidden');
-      $('authActionSelect').value = 'none';
+      setAuthAuxMode('none');
       $('newPassConfirm').value = '';
     } catch(err){
       if (String(err?.message || '') === 'password_mismatch') setNotice('Reset failed: passwords do not match.', 'error');

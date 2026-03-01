@@ -4,6 +4,14 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.13] - 2026-02-28
+### Changed
+- Auth helper modes now switch the main auth card between Login / Register / Recover views so forms are no longer stacked together.
+
+## [1.0.12] - 2026-02-28
+### Changed
+- Replaced the login helper dropdown with dedicated **Register** and **Forgot password** buttons that toggle the existing registration/recovery panels inline.
+
 ## [1.0.11] - 2026-02-28
 ### Changed
 - Message text now linkifies `http://` and `https://` URLs as blue, clickable links that open in a new tab (`target="_blank"`, `rel="noopener noreferrer"`).
