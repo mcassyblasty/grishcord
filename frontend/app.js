@@ -830,6 +830,53 @@ async function loadPersistentNotifications() {
   } catch {}
 }
 
+
+function isAtBottom(el, threshold = 24) {
+  if (!el) return true;
+  const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+  return remaining <= threshold;
+}
+
+function scrollToBottom(el) {
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
+
+function latestNotificationForCurrentTarget() {
+  const list = Array.isArray(state.notifications) ? state.notifications : [];
+  const matches = list.filter((n) => {
+    if (state.mode === 'channel') {
+      return n.mode === 'channel' && Number(n.channelId) === Number(state.activeChannelId);
+    }
+    if (state.mode === 'dm') {
+      return n.mode === 'dm' && Number(n.dmPeerId) === Number(state.activeDmPeerId);
+    }
+    return false;
+  });
+  if (!matches.length) return null;
+  return matches
+    .slice()
+    .sort((a, b) => {
+      const ta = Date.parse(a.createdAt || '') || 0;
+      const tb = Date.parse(b.createdAt || '') || 0;
+      if (tb !== ta) return tb - ta;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })[0] || null;
+}
+
+function focusLatestNotificationAtBottom() {
+  const latest = latestNotificationForCurrentTarget();
+  if (!latest) return false;
+  const id = Number(latest.messageId || latest.id || 0);
+  if (!id) return false;
+  const node = $('msgs').querySelector(`[data-message-id="${id}"]`);
+  if (!node) return false;
+  node.scrollIntoView({ block: 'end', behavior: 'auto' });
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 1200);
+  return true;
+}
+
 function focusMessageById(messageId) {
   const id = Number(messageId);
   if (!id) return;
@@ -914,7 +961,9 @@ async function loadMessages(){
   }
   state.lastId = 0;
   for (const m of rows){ renderMessage(m); state.lastId = Math.max(state.lastId, Number(m.id||0)); }
-  $('msgs').scrollTop = $('msgs').scrollHeight;
+  if (!focusLatestNotificationAtBottom()) {
+    scrollToBottom($('msgs'));
+  }
 }
 
 function connectWs(){
@@ -928,11 +977,13 @@ function connectWs(){
       if (msg.data.mode === 'dm' || String(msg.data.title || '').toLowerCase().includes('ping')) playIncomingMessageSound();
     }
     if(msg.type === 'message' && msg.data && isCurrentTarget(msg.data)){
-      const placeholder = $('msgs').querySelector('.empty');
+      const msgsEl = $('msgs');
+      const shouldStick = isAtBottom(msgsEl);
+      const placeholder = msgsEl.querySelector('.empty');
       if (placeholder) placeholder.remove();
       renderMessage(msg.data);
       state.lastId = Math.max(state.lastId, Number(msg.data.id || 0));
-      $('msgs').scrollTop = $('msgs').scrollHeight;
+      if (shouldStick) scrollToBottom(msgsEl);
     }
     if (msg.type === 'message_deleted' && msg.data?.id) {
       const n = $('msgs').querySelector(`[data-message-id="${msg.data.id}"]`);
