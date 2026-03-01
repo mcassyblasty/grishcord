@@ -17,6 +17,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 const app = express();
+// Honor X-Forwarded-* from Caddy so same-origin checks use the browser-facing HTTPS origin.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 

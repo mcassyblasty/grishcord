@@ -68,6 +68,9 @@
     .authCard h2{margin-top:0}
     .authForm{display:flex;flex-direction:column;gap:.6rem}
     .authToggle{margin-top:.75rem;display:flex;flex-direction:column;gap:.45rem}
+    .authModeBtns{display:flex;gap:.5rem}
+    .authModeBtn{flex:1}
+    .authModeBtn.active{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent)}
     .notice{margin-top:.75rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:10px;min-height:2.2rem;display:flex;align-items:center}
     .notice.error{border-color:var(--danger);color:var(--danger)}
     .notice.ok{border-color:var(--ok);color:var(--ok)}
@@ -87,6 +90,8 @@
     .replyPreview{margin:.35rem .75rem 0;padding:.45rem .55rem;border:1px dashed var(--line);border-radius:8px;font-size:.85rem;color:var(--muted)}
     .msgTools{display:flex;gap:.2rem;position:absolute;top:.3rem;right:.3rem}
     .msgTools button{padding:.18rem .35rem;min-width:26px;min-height:24px;line-height:1;font-size:.82rem;border-radius:7px}
+    .msgLink{color:#60a5fa;text-decoration:underline;text-underline-offset:2px;word-break:break-all}
+    .msgLink:hover{color:#93c5fd}
     .pendingImage{margin:.35rem .75rem 0;padding:.45rem;border:1px dashed var(--line);border-radius:8px;display:flex;gap:.5rem;align-items:center}
     .pendingImage img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
     .msgImage{max-width:min(360px,86vw);max-height:280px;width:auto;height:auto;border-radius:10px;border:1px solid var(--line);margin-top:.35rem;cursor:pointer;object-fit:contain;background:#0004}
@@ -184,40 +189,41 @@
 
   <div id="authView" class="authWrap">
     <div class="authCard">
-      <h2>Login</h2>
+      <h2 id="authTitle">Login</h2>
       <form id="loginForm" class="authForm">
         <input id="loginUser" placeholder="username" autocomplete="username" required>
         <input id="loginPass" type="password" placeholder="password" autocomplete="current-password" required>
         <button id="loginBtn" class="primary" type="submit">Login</button>
       </form>
 
+      <div id="registerPanel" class="hidden" style="margin-top:.35rem">
+        <form id="registerForm" class="authForm">
+          <input id="regUser" placeholder="username" required>
+          <input id="regPass" type="password" placeholder="password" required>
+          <input id="regPassConfirm" type="password" placeholder="confirm password" required>
+          <input id="regInvite" placeholder="invite token" required>
+          <input id="regDisplay" placeholder="display name" required>
+          <button id="regBtn" class="primary" type="submit">Register</button>
+        </form>
+      </div>
+
+      <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
+        <form id="redeemForm" class="authForm">
+          <input id="recoverToken" placeholder="recovery token" required>
+          <button id="redeemBtn" class="primary" type="submit">Redeem Token</button>
+        </form>
+        <form id="resetForm" class="authForm" style="margin-top:.5rem">
+          <input id="newPass" type="password" placeholder="new password" required>
+          <input id="newPassConfirm" type="password" placeholder="confirm new password" required>
+          <button id="resetBtn" class="primary" type="submit">Reset Password</button>
+        </form>
+      </div>
+
       <div class="authToggle">
-        <label for="authActionSelect" class="small">Need help signing in?</label>
-        <select id="authActionSelect" aria-label="Authentication actions">
-          <option value="none" selected>Choose an option…</option>
-          <option value="register">Need an invite? Register</option>
-          <option value="recovery">Need password recovery?</option>
-        </select>
-
-        <div id="registerPanel" class="hidden" style="margin-top:.35rem">
-          <form id="registerForm" class="authForm">
-            <input id="regInvite" placeholder="invite token" required>
-            <input id="regUser" placeholder="username" required>
-            <input id="regDisplay" placeholder="display name" required>
-            <input id="regPass" type="password" placeholder="password" required>
-            <button id="regBtn" class="primary" type="submit">Register</button>
-          </form>
-        </div>
-
-        <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
-          <form id="redeemForm" class="authForm">
-            <input id="recoverToken" placeholder="recovery token" required>
-            <button id="redeemBtn" class="primary" type="submit">Redeem Token</button>
-          </form>
-          <form id="resetForm" class="authForm" style="margin-top:.5rem">
-            <input id="newPass" type="password" placeholder="new password" required>
-            <button id="resetBtn" class="primary" type="submit">Reset Password</button>
-          </form>
+        <div id="authHelpLabel" class="small">Need help signing in?</div>
+        <div class="authModeBtns">
+          <button id="authModeBtnA" type="button" class="ghost authModeBtn">Register</button>
+          <button id="authModeBtnB" type="button" class="ghost authModeBtn">Forgot password</button>
         </div>
       </div>
 
