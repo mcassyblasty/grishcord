@@ -75,6 +75,24 @@ Use:
 
 `install` writes host-local Ollama settings to `.ollama.env` (model path and model name), configures systemd override, and keeps Ollama bound to `127.0.0.1:11434`.
 
+
+### Ollama networking modes (secure vs docker)
+`./scripts/ollamactrl.sh` supports two bind modes and persists your choice in `.ollama.env` (`OLLAMA_BIND_MODE`):
+
+- **secure** (default): Ollama binds to `127.0.0.1:11434`.
+  - Best default for host security.
+  - A bot container cannot reach host-loopback through `host.docker.internal`.
+  - Use this mode when the bot runs on the host network/process namespace (or outside Docker on the host).
+
+- **docker**: Ollama binds to `0.0.0.0:11434`.
+  - Needed for standard Docker bridge access from the bot container using `http://host.docker.internal:11434`.
+  - Keep access restricted with host firewall/network policy so only local host + Docker networks can reach port `11434`.
+  - Do **not** expose port `11434` to public networks.
+
+The bot compose service is already configured with `extra_hosts: ["host.docker.internal:host-gateway"]` and defaults to `OLLAMA_BASE_URL=http://host.docker.internal:11434`.
+
+`ollamactrl` now waits for the Ollama API to become ready before model pulls, reducing restart/pull race failures.
+
 ### Configure bot identity/runtime defaults
 Use:
 - `./scripts/aibotctl.sh install`
