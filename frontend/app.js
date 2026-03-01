@@ -1937,19 +1937,28 @@ async function boot(){
     $('loginForm').classList.toggle('hidden', !loginOpen);
     $('registerPanel').classList.toggle('hidden', !registerOpen);
     $('recoveryPanel').classList.toggle('hidden', !recoveryOpen);
-    $('authRegisterBtn')?.classList.toggle('active', registerOpen);
-    $('authRecoveryBtn')?.classList.toggle('active', recoveryOpen);
     if ($('authTitle')) $('authTitle').textContent = registerOpen ? 'Register' : (recoveryOpen ? 'Recover Account' : 'Login');
+
+    const a = $('authModeBtnA');
+    const b = $('authModeBtnB');
+    const help = $('authHelpLabel');
+    const modes = {
+      none: { help: 'Need help signing in?', a: ['Register', 'register'], b: ['Forgot password', 'recovery'] },
+      register: { help: 'Need a different option?', a: ['Login', 'none'], b: ['Forgot password', 'recovery'] },
+      recovery: { help: 'Need a different option?', a: ['Login', 'none'], b: ['Register', 'register'] }
+    };
+    const cfg = modes[mode] || modes.none;
+    if (help) help.textContent = cfg.help;
+    if (a) { a.textContent = cfg.a[0]; a.dataset.mode = cfg.a[1]; }
+    if (b) { b.textContent = cfg.b[0]; b.dataset.mode = cfg.b[1]; }
   };
 
-  $('authRegisterBtn').onclick = ()=> {
-    const isOpen = !$('registerPanel').classList.contains('hidden');
-    setAuthAuxMode(isOpen ? 'none' : 'register');
+  const authModeBtnClick = (ev)=> {
+    const next = String(ev.currentTarget?.dataset?.mode || 'none');
+    setAuthAuxMode(next);
   };
-  $('authRecoveryBtn').onclick = ()=> {
-    const isOpen = !$('recoveryPanel').classList.contains('hidden');
-    setAuthAuxMode(isOpen ? 'none' : 'recovery');
-  };
+  $('authModeBtnA').onclick = authModeBtnClick;
+  $('authModeBtnB').onclick = authModeBtnClick;
 
   $('loginForm').onsubmit = async (e)=>{
     e.preventDefault();

@@ -196,34 +196,34 @@
         <button id="loginBtn" class="primary" type="submit">Login</button>
       </form>
 
+      <div id="registerPanel" class="hidden" style="margin-top:.35rem">
+        <form id="registerForm" class="authForm">
+          <input id="regUser" placeholder="username" required>
+          <input id="regPass" type="password" placeholder="password" required>
+          <input id="regPassConfirm" type="password" placeholder="confirm password" required>
+          <input id="regInvite" placeholder="invite token" required>
+          <input id="regDisplay" placeholder="display name" required>
+          <button id="regBtn" class="primary" type="submit">Register</button>
+        </form>
+      </div>
+
+      <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
+        <form id="redeemForm" class="authForm">
+          <input id="recoverToken" placeholder="recovery token" required>
+          <button id="redeemBtn" class="primary" type="submit">Redeem Token</button>
+        </form>
+        <form id="resetForm" class="authForm" style="margin-top:.5rem">
+          <input id="newPass" type="password" placeholder="new password" required>
+          <input id="newPassConfirm" type="password" placeholder="confirm new password" required>
+          <button id="resetBtn" class="primary" type="submit">Reset Password</button>
+        </form>
+      </div>
+
       <div class="authToggle">
-        <div class="small">Need help signing in?</div>
+        <div id="authHelpLabel" class="small">Need help signing in?</div>
         <div class="authModeBtns">
-          <button id="authRegisterBtn" type="button" class="ghost authModeBtn">Register</button>
-          <button id="authRecoveryBtn" type="button" class="ghost authModeBtn">Forgot password</button>
-        </div>
-
-        <div id="registerPanel" class="hidden" style="margin-top:.35rem">
-          <form id="registerForm" class="authForm">
-            <input id="regInvite" placeholder="invite token" required>
-            <input id="regUser" placeholder="username" required>
-            <input id="regDisplay" placeholder="display name" required>
-            <input id="regPass" type="password" placeholder="password" required>
-            <input id="regPassConfirm" type="password" placeholder="confirm password" required>
-            <button id="regBtn" class="primary" type="submit">Register</button>
-          </form>
-        </div>
-
-        <div id="recoveryPanel" class="hidden" style="margin-top:.35rem">
-          <form id="redeemForm" class="authForm">
-            <input id="recoverToken" placeholder="recovery token" required>
-            <button id="redeemBtn" class="primary" type="submit">Redeem Token</button>
-          </form>
-          <form id="resetForm" class="authForm" style="margin-top:.5rem">
-            <input id="newPass" type="password" placeholder="new password" required>
-            <input id="newPassConfirm" type="password" placeholder="confirm new password" required>
-            <button id="resetBtn" class="primary" type="submit">Reset Password</button>
-          </form>
+          <button id="authModeBtnA" type="button" class="ghost authModeBtn">Register</button>
+          <button id="authModeBtnB" type="button" class="ghost authModeBtn">Forgot password</button>
         </div>
       </div>
 
