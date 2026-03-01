@@ -36,6 +36,26 @@ const state = {
 const spamMap = {1:{burst:3,sustained:10,cooldown:120},3:{burst:5,sustained:15,cooldown:60},5:{burst:8,sustained:25,cooldown:30},7:{burst:12,sustained:40,cooldown:15},10:{burst:20,sustained:80,cooldown:5}};
 
 function text(el, v){ el.textContent = v; }
+function renderMessageBodyWithLinks(el, raw) {
+  const textValue = String(raw || '');
+  el.textContent = '';
+  const urlRe = /(https?:\/\/[^\s<>'\"]+)/g;
+  let last = 0;
+  for (const m of textValue.matchAll(urlRe)) {
+    const i = m.index ?? 0;
+    if (i > last) el.appendChild(document.createTextNode(textValue.slice(last, i)));
+    const url = m[0];
+    const a = document.createElement('a');
+    a.href = url;
+    a.textContent = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'msgLink';
+    el.appendChild(a);
+    last = i + url.length;
+  }
+  if (last < textValue.length) el.appendChild(document.createTextNode(textValue.slice(last)));
+}
 function clearNotice(){ const n=$('authMsg'); n.classList.remove('error','ok'); n.classList.add('hidden'); text(n,''); }
 function setNotice(msg, kind='error'){ const n=$('authMsg'); n.classList.remove('hidden','error','ok'); if(kind) n.classList.add(kind); text(n,msg); }
 function showAuth(msg='', kind=''){ $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); $('settingsMenuWrap').classList.add('hidden'); $('notifMenuWrap').classList.add('hidden'); if(msg) setNotice(msg,kind); else clearNotice(); $('loginUser')?.focus(); }
@@ -254,7 +274,17 @@ function renderMessageUploads(wrap, uploads = []) {
       img.src = up.url;
       img.alt = `Attached image ${imageOrder}`;
       img.loading = 'lazy';
+      img.decoding = 'async';
       img.onclick = () => openLightbox(up.url);
+      img.onerror = () => {
+        const fallback = document.createElement('a');
+        fallback.href = up.url;
+        fallback.target = '_blank';
+        fallback.rel = 'noopener noreferrer';
+        fallback.className = 'msgLink';
+        fallback.textContent = `Open image ${imageOrder}`;
+        img.replaceWith(fallback);
+      };
       imgWrap.appendChild(img);
       continue;
     }
@@ -359,12 +389,12 @@ function renderMessage(m){
     reply.textContent = `↪ ${(m.reply_body || '').slice(0,120)}`;
     wrap.appendChild(reply);
   }
-  body.textContent = short;
+  renderMessageBodyWithLinks(body, short);
   wrap.append(meta, body);
   wrap.style.paddingTop = '.8rem';
   if (full.length > 2000){
     const b = document.createElement('button'); b.textContent='Read more';
-    b.onclick = () => { body.textContent = full.slice(0,10000); b.remove(); };
+    b.onclick = () => { renderMessageBodyWithLinks(body, full.slice(0,10000)); b.remove(); };
     wrap.appendChild(b);
   }
   renderMessageUploads(wrap, m.uploads);
@@ -490,7 +520,7 @@ function renderMessage(m){
           const r = await api(`/api/messages/${m.id}`, 'PATCH', { body: next, uploadIds });
           m.body = r.body || next;
           m.uploads = Array.isArray(r.uploads) ? r.uploads : [];
-          body.textContent = m.body;
+          renderMessageBodyWithLinks(body, m.body);
           renderMessageUploads(wrap, m.uploads);
           restore();
         } catch (err) {
@@ -572,6 +602,9 @@ function normalizeMentionKey(v) {
 function mentionCandidates() {
   const out = [];
   const seen = new Set();
+  const everyoneKey = normalizeMentionKey('everyone');
+  out.push({ token: 'everyone', key: everyoneKey, userId: 0, label: '@everyone' });
+  seen.add(everyoneKey);
   const add = (user) => {
     if (!user) return;
     const username = String(user.username || '').trim();
@@ -656,7 +689,8 @@ function messageMentionsMe(body) {
   const re = /(^|\s)@([A-Za-z0-9_.-]+)/g;
   let m;
   while ((m = re.exec(textBody)) !== null) {
-    if (keys.has(normalizeMentionKey(m[2]))) return true;
+    const mentionKey = normalizeMentionKey(m[2]);
+    if (mentionKey === "everyone" || keys.has(mentionKey)) return true;
   }
   return false;
 }
@@ -1009,110 +1043,146 @@ async function refreshAdmin(){
   // Invite list is no longer rendered inline; CSV export is available instead.
 
   const userList = $('userList'); userList.textContent='';
-  for(const u of s.users){
+  const users = Array.isArray(s.users) ? s.users : [];
+  const byId = new Map(users.map((u) => [String(u.id), u]));
+
+  const picker = document.createElement('div');
+  picker.className = 'adminUserPicker';
+
+  const select = document.createElement('select');
+  select.className = 'adminUserSelect';
+  for (const u of users) {
+    const opt = document.createElement('option');
+    opt.value = String(u.id);
+    opt.textContent = `${u.display_name || u.username} (@${u.username})${u.disabled ? ' • frozen' : ''}${u.is_admin ? ' • admin' : ''}`;
+    select.appendChild(opt);
+  }
+
+  const details = document.createElement('div');
+
+  const renderSelectedUser = () => {
+    details.textContent = '';
+    const u = byId.get(String(select.value));
+    if (!u) return;
+
     const row = document.createElement('div');
     row.className='adminUserRow';
     const meta = document.createElement('div');
     meta.className = 'adminUserMeta';
     meta.textContent = `${u.display_name || u.username} (@${u.username})${u.disabled ? ' • frozen' : ''}`;
     row.appendChild(meta);
-    if (u.username !== 'mcassyblasty') {
-      const actions = document.createElement('div');
-      actions.className = 'adminUserActions';
 
-      const adminLabel = document.createElement('label');
-      adminLabel.className = 'small';
-      const adminCheck = document.createElement('input');
-      adminCheck.type = 'checkbox';
-      adminCheck.checked = u.is_admin === true;
-      adminCheck.onchange = async () => {
-        try {
-          await api(`/api/admin/users/${u.id}/admin`, 'POST', { isAdmin: adminCheck.checked });
-          await refreshAdmin();
-        } catch (err) {
-          showError(`Admin update failed: ${humanError(err)}`);
-          await refreshAdmin();
-        }
-      };
-      adminLabel.append(adminCheck, document.createTextNode(' admin'));
-      actions.append(adminLabel);
-
-      const btn = document.createElement('button');
-      btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
-      btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
-
-      const delBtn = document.createElement('button');
-      delBtn.textContent = 'Delete User';
-      delBtn.onclick = ()=>{
-        const existing = row.querySelector('.deleteVerify');
-        if (existing) {
-          existing.remove();
-          return;
-        }
-        const verify = document.createElement('div');
-        verify.className = 'deleteVerify';
-        verify.style.display = 'flex';
-        verify.style.flexDirection = 'column';
-        verify.style.gap = '.4rem';
-        verify.style.width = '100%';
-        verify.style.marginTop = '.35rem';
-
-        const hint = document.createElement('div');
-        hint.className = 'small';
-        hint.textContent = `Type username exactly to delete: ${u.username}`;
-
-        const input = document.createElement('input');
-        input.placeholder = 'type exact username to confirm';
-
-        const checkRow = document.createElement('label');
-        checkRow.className = 'small';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkRow.append(checkbox, document.createTextNode(' I understand this permanently deletes this user account and related messages/uploads.'));
-
-        const actionsRow = document.createElement('div');
-        actionsRow.className = 'row';
-        const confirm = document.createElement('button');
-        confirm.textContent = 'Confirm Delete';
-        confirm.onclick = async()=>{
-          try {
-            await api(`/api/admin/users/${u.id}/delete`, 'POST', { confirmUsername: input.value, confirmChecked: checkbox.checked });
-            await refreshChannels();
-            await refreshDms();
-            await refreshAdmin();
-            if (state.mode === 'dm' && state.activeDmPeerId === u.id) {
-              state.activeDmPeerId = state.users[0]?.id || null;
-              if (state.activeDmPeerId) {
-                const active = state.users.find((x) => x.id === state.activeDmPeerId);
-                if (active) text($('chatHeader'), `DM: ${active.display_name}`);
-              } else {
-                state.mode = 'channel';
-                const fallback = state.channels.find((c) => c.kind !== 'voice');
-                if (fallback) {
-                  state.activeChannelId = fallback.id;
-                  text($('chatHeader'), `# ${fallback.name}`);
-                }
-              }
-              await loadMessages();
-            }
-          } catch (err) {
-            showError(`Delete user failed: ${humanError(err)}`);
-          }
-        };
-        const cancel = document.createElement('button');
-        cancel.textContent = 'Cancel';
-        cancel.onclick = ()=> verify.remove();
-        actionsRow.append(confirm, cancel);
-
-        verify.append(hint, input, checkRow, actionsRow);
-        row.appendChild(verify);
-      };
-
-      actions.append(btn, delBtn);
-      row.append(actions);
+    if (u.username === 'mcassyblasty') {
+      const note = document.createElement('div');
+      note.className = 'small';
+      note.textContent = 'Owner account controls are protected.';
+      row.appendChild(note);
+      details.appendChild(row);
+      return;
     }
-    userList.appendChild(row);
-  }
+
+    const actions = document.createElement('div');
+    actions.className = 'adminUserActions';
+
+    const adminLabel = document.createElement('label');
+    adminLabel.className = 'small';
+    const adminCheck = document.createElement('input');
+    adminCheck.type = 'checkbox';
+    adminCheck.checked = u.is_admin === true;
+    adminCheck.onchange = async () => {
+      try {
+        await api(`/api/admin/users/${u.id}/admin`, 'POST', { isAdmin: adminCheck.checked });
+        await refreshAdmin();
+      } catch (err) {
+        showError(`Admin update failed: ${humanError(err)}`);
+        await refreshAdmin();
+      }
+    };
+    adminLabel.append(adminCheck, document.createTextNode(' admin'));
+    actions.append(adminLabel);
+
+    const btn = document.createElement('button');
+    btn.textContent = u.disabled ? 'Unfreeze' : 'Freeze';
+    btn.onclick = async()=>{ await api(`/api/admin/users/${u.id}/disable`,'POST',{disabled: !u.disabled}); await refreshAdmin(); };
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete User';
+    delBtn.onclick = ()=>{
+      const existing = row.querySelector('.deleteVerify');
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      const verify = document.createElement('div');
+      verify.className = 'deleteVerify';
+      verify.style.display = 'flex';
+      verify.style.flexDirection = 'column';
+      verify.style.gap = '.4rem';
+      verify.style.width = '100%';
+      verify.style.marginTop = '.35rem';
+
+      const hint = document.createElement('div');
+      hint.className = 'small';
+      hint.textContent = `Type username exactly to delete: ${u.username}`;
+
+      const input = document.createElement('input');
+      input.placeholder = 'type exact username to confirm';
+
+      const checkRow = document.createElement('label');
+      checkRow.className = 'small';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkRow.append(checkbox, document.createTextNode(' I understand this permanently deletes this user account and related messages/uploads.'));
+
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'row';
+      const confirm = document.createElement('button');
+      confirm.textContent = 'Confirm Delete';
+      confirm.onclick = async()=>{
+        try {
+          await api(`/api/admin/users/${u.id}/delete`, 'POST', { confirmUsername: input.value, confirmChecked: checkbox.checked });
+          await refreshChannels();
+          await refreshDms();
+          await refreshAdmin();
+          if (state.mode === 'dm' && state.activeDmPeerId === u.id) {
+            state.activeDmPeerId = state.users[0]?.id || null;
+            if (state.activeDmPeerId) {
+              const active = state.users.find((x) => x.id === state.activeDmPeerId);
+              if (active) text($('chatHeader'), `DM: ${active.display_name}`);
+            } else {
+              state.mode = 'channel';
+              const fallback = state.channels.find((c) => c.kind !== 'voice');
+              if (fallback) {
+                state.activeChannelId = fallback.id;
+                text($('chatHeader'), `# ${fallback.name}`);
+              }
+            }
+            await loadMessages();
+          }
+        } catch (err) {
+          showError(`Delete user failed: ${humanError(err)}`);
+        }
+      };
+      const cancel = document.createElement('button');
+      cancel.textContent = 'Cancel';
+      cancel.onclick = ()=> verify.remove();
+      actionsRow.append(confirm, cancel);
+
+      verify.append(hint, input, checkRow, actionsRow);
+      row.appendChild(verify);
+    };
+
+    actions.append(btn, delBtn);
+    row.append(actions);
+    details.appendChild(row);
+  };
+
+  select.onchange = renderSelectedUser;
+  if (users[0]) select.value = String(users[0].id);
+  renderSelectedUser();
+
+  picker.append(select, details);
+  userList.appendChild(picker);
   renderChannelAdmin();
 }
 
@@ -1910,11 +1980,43 @@ async function boot(){
   $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar('text');
   $('addVoiceChannelBtn').onclick = ()=> createChannelFromSidebar('voice');
 
-  $('authActionSelect').onchange = ()=> {
-    const v = $('authActionSelect').value;
-    $('registerPanel').classList.toggle('hidden', v !== 'register');
-    $('recoveryPanel').classList.toggle('hidden', v !== 'recovery');
+  const setAuthAuxMode = (mode = 'none') => {
+    const registerOpen = mode === 'register';
+    const recoveryOpen = mode === 'recovery';
+    const loginOpen = !registerOpen && !recoveryOpen;
+    $('loginForm').classList.toggle('hidden', !loginOpen);
+    $('registerPanel').classList.toggle('hidden', !registerOpen);
+    $('recoveryPanel').classList.toggle('hidden', !recoveryOpen);
+    if ($('authTitle')) $('authTitle').textContent = registerOpen ? 'Register' : (recoveryOpen ? 'Recover Account' : 'Login');
+
+    const a = $('authModeBtnA');
+    const b = $('authModeBtnB');
+    const help = $('authHelpLabel');
+    const modes = {
+      none: { help: 'Need help signing in?', a: ['Register', 'register'], b: ['Forgot password', 'recovery'] },
+      register: { help: 'Need a different option?', a: ['Login', 'none'], b: ['Forgot password', 'recovery'] },
+      recovery: { help: 'Need a different option?', a: ['Login', 'none'], b: ['Register', 'register'] }
+    };
+    const cfg = modes[mode] || modes.none;
+    if (recoveryOpen) setRecoveryStage(state.redeemId ? 'reset' : 'redeem');
+    if (help) help.textContent = cfg.help;
+    if (a) { a.textContent = cfg.a[0]; a.dataset.mode = cfg.a[1]; }
+    if (b) { b.textContent = cfg.b[0]; b.dataset.mode = cfg.b[1]; }
   };
+
+  const setRecoveryStage = (stage = 'redeem') => {
+    const showReset = stage === 'reset';
+    $('redeemForm').classList.toggle('hidden', showReset);
+    $('resetForm').classList.toggle('hidden', !showReset);
+  };
+
+
+  const authModeBtnClick = (ev)=> {
+    const next = String(ev.currentTarget?.dataset?.mode || 'none');
+    setAuthAuxMode(next);
+  };
+  $('authModeBtnA').onclick = authModeBtnClick;
+  $('authModeBtnB').onclick = authModeBtnClick;
 
   $('loginForm').onsubmit = async (e)=>{
     e.preventDefault();
@@ -1934,12 +2036,14 @@ async function boot(){
     const btn = $('regBtn');
     setBusy(btn, true);
     try {
+      if ($('regPass').value !== $('regPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/register','POST',{inviteToken:$('regInvite').value.trim(),username:$('regUser').value.trim(),displayName:$('regDisplay').value.trim(),password:$('regPass').value});
       setNotice('Registered. Log in now.', 'ok');
-      $('registerPanel').classList.add('hidden');
-      $('authActionSelect').value = 'none';
+      setAuthAuxMode('none');
+      $('regPassConfirm').value = '';
     } catch(err){
-      setNotice(`Register failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Register failed: passwords do not match.', 'error');
+      else setNotice(`Register failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 
@@ -1950,6 +2054,7 @@ async function boot(){
     try {
       const r = await api('/api/recovery/redeem','POST',{token:$('recoverToken').value.trim()});
       state.redeemId = r.redeemId;
+      setRecoveryStage('reset');
       setNotice('Token redeemed. Set new password below.', 'ok');
     } catch(err){
       setNotice(`Redeem failed: ${humanError(err)}`, 'error');
@@ -1961,12 +2066,20 @@ async function boot(){
     const btn = $('resetBtn');
     setBusy(btn, true);
     try {
+      if (!state.redeemId) throw new Error('invalid_token');
+      if ($('newPass').value !== $('newPassConfirm').value) throw new Error('password_mismatch');
       await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
       setNotice('Password reset complete.', 'ok');
-      $('recoveryPanel').classList.add('hidden');
-      $('authActionSelect').value = 'none';
+      state.redeemId = null;
+      $('recoverToken').value = '';
+      $('newPass').value = '';
+      $('newPassConfirm').value = '';
+      setRecoveryStage('redeem');
+      setAuthAuxMode('none');
     } catch(err){
-      setNotice(`Reset failed: ${humanError(err)}`, 'error');
+      if (String(err?.message || '') === 'password_mismatch') setNotice('Reset failed: passwords do not match.', 'error');
+      else if (String(err?.message || '') === 'invalid_token') setNotice('Reset failed: redeem a valid token first.', 'error');
+      else setNotice(`Reset failed: ${humanError(err)}`, 'error');
     } finally { setBusy(btn, false); }
   };
 

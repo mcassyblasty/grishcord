@@ -17,6 +17,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 const app = express();
+// Honor X-Forwarded-* from Caddy so same-origin checks use the browser-facing HTTPS origin.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
@@ -595,10 +597,12 @@ async function createNotificationsForMessage(msg, author) {
   }
   const mentionKeys = extractMentionTokens(msg.body || '');
   if (mentionKeys.length) {
+    const isEveryoneMention = mentionKeys.includes('everyone');
     const { rows } = await pool.query('SELECT id, username, display_name FROM users WHERE id <> $1', [author.id]);
     for (const u of rows) {
       const keys = [normalizeMentionKey(u.username), normalizeMentionKey(u.display_name)].filter(Boolean);
-      if (keys.some((k) => mentionKeys.includes(k))) {
+      const matched = isEveryoneMention ? Boolean(msg.channel_id) : keys.some((k) => mentionKeys.includes(k));
+      if (matched) {
         const existing = recipients.get(Number(u.id));
         recipients.set(Number(u.id), {
           kind: existing?.kind === 'dm' ? 'dm' : 'ping',
