@@ -36,7 +36,7 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ## Security-related environment notes
 - `PUBLIC_BASE_URL` should match your externally reachable app URL.
-- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://`) so Caddy can automatically provision TLS certificates.
+- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
 - Authentication and recovery endpoints are rate-limited server-side; repeated failures receive HTTP `429` with `Retry-After`.
 
@@ -51,3 +51,4 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ## Cloudflare / Internet edge note
 - If you use Cloudflare proxy and see **522**, the edge cannot reach your origin on 80/443. Ensure host firewall allows inbound TCP 80/443, router forwards 80/443 to this host, and Cloudflare SSL mode is **Full (strict)** once certs are issued.
+- Cloudflare **Full** / **Full (strict)** require origin HTTPS on 443 with a certificate; **Flexible** uses HTTP to origin. If issuance fails while proxied, temporarily switch DNS record to DNS-only, issue certs, then re-enable proxy with **Full (strict)**.

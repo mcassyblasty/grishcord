@@ -4,6 +4,52 @@ All notable changes to Grishcord are documented in this file.
 
 The format is inspired by Keep a Changelog and follows semantic-ish version tags maintained in the top-level `VERSION` file.
 
+## [1.0.13] - 2026-02-28
+### Changed
+- Auth helper modes now switch the main auth card between Login / Register / Recover views so forms are no longer stacked together.
+
+## [1.0.12] - 2026-02-28
+### Changed
+- Replaced the login helper dropdown with dedicated **Register** and **Forgot password** buttons that toggle the existing registration/recovery panels inline.
+
+## [1.0.11] - 2026-02-28
+### Changed
+- Message text now linkifies `http://` and `https://` URLs as blue, clickable links that open in a new tab (`target="_blank"`, `rel="noopener noreferrer"`).
+
+## [1.0.10] - 2026-02-28
+### Changed
+- Added password confirmation fields for registration and password reset forms, with client-side mismatch validation before API calls.
+
+## [1.0.9] - 2026-02-28
+### Fixed
+- Fixed `grishcordctl start` HTTPS preflight crash caused by unescaped `$CADDY_SITE_ADDRESS` in an error string under `set -u`.
+- Replaced hostname-site validation from `rg` to portable `grep -E` and broadened matching to support `{$CADDY_SITE_ADDRESS:default}` site labels.
+
+## [1.0.8] - 2026-02-28
+### Fixed
+- Fixed internet login failures caused by strict same-origin checks behind reverse proxy by enabling Express proxy trust (`app.set('trust proxy', 1)`), so `req.protocol` correctly reflects forwarded HTTPS.
+
+## [1.0.7] - 2026-02-28
+### Fixed
+- Restored dual HTTP/HTTPS Caddy routing so LAN HTTP remains stable while public-host automatic HTTPS stays enabled.
+- Added a TLS fallback listener on `:443` (`tls internal`) to prevent `ERR_SSL_PROTOCOL_ERROR` on direct LAN-IP HTTPS probes.
+- Relaxed HTTPS preflight guard in `grishcordctl` to require a hostname-based Caddy site instead of rejecting any config that also includes `:80`.
+
+## [1.0.6] - 2026-02-28
+### Fixed
+- Prevented HTTPS regressions by enforcing hostname-based Caddy site configuration and blocking `:80`-only Caddyfiles during HTTPS preflight.
+- Hardened deploy-time env handling so `CADDY_SITE_ADDRESS` is required for compose and can be derived from `PUBLIC_BASE_URL` when omitted in `.env`.
+- Reinforced Cloudflare HTTPS guidance for origin certificate issuance and Full (strict) mode.
+
+## [1.0.5] - 2026-02-28
+### Changed
+- Bumped version tracking to `1.0.5` to align release numbering after missed increment steps during recent Caddy/compose updates.
+
+## [1.0.4] - 2026-02-28
+### Fixed
+- Restored Caddy automatic HTTPS by using a hostname-based site label instead of an HTTP-only `:80` site block.
+- Added persistent Caddy `/data` and `/config` volumes and tightened HTTPS preflight validation in `grishcordctl`.
+
 ## [1.0.3] - 2026-02-26
 ### Fixed
 - Fixed invalid redirect behavior on LAN/IP access by serving generic HTTP traffic directly and only redirecting the configured public hostname to HTTPS.
