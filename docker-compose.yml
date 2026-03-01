@@ -62,6 +62,34 @@ services:
       frontend:
         condition: service_started
 
+
+  bot:
+    build: ./bot
+    environment:
+      GRISHCORD_BASE_URL: ${GRISHCORD_BASE_URL:-http://backend:3000}
+      BOT_USERNAME: ${BOT_USERNAME:-}
+      BOT_PASSWORD: ${BOT_PASSWORD:-}
+      BOT_DISPLAY_NAME: ${BOT_DISPLAY_NAME:-}
+      BOT_COLOR: ${BOT_COLOR:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      BOT_OLLAMA_TIMEOUT_MS: ${BOT_OLLAMA_TIMEOUT_MS:-30000}
+      BOT_MAX_REPLY_CHARS: ${BOT_MAX_REPLY_CHARS:-1800}
+      BOT_CONTEXT_MAX_MESSAGES: ${BOT_CONTEXT_MAX_MESSAGES:-30}
+      BOT_CONVO_TTL_MS: ${BOT_CONVO_TTL_MS:-900000}
+      BOT_RATE_LIMIT_MS: ${BOT_RATE_LIMIT_MS:-2000}
+      BOT_MAX_CONCURRENCY_PER_CHANNEL: ${BOT_MAX_CONCURRENCY_PER_CHANNEL:-1}
+      BOT_PROMPT_FILE: ${BOT_PROMPT_FILE:-/config/bot/prompts/system.txt}
+      BOT_CONFIG_FILE: /config/.aibot.env
+      OLLAMA_CONFIG_FILE: /config/.ollama.env
+    volumes:
+      - ./:/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      backend:
+        condition: service_healthy
+
   livekit:
     image: livekit/livekit-server:latest
     command: ["--config", "/etc/livekit.yaml"]
