@@ -33,7 +33,7 @@ is_repo_dir() {
 
 provision_repo_checkout() {
   local default_target="${HOME:-$PWD}/grishcord"
-  local target source_mode source
+  local target source_mode source archive_url
 
   warn "Grishcord repo root was not found automatically."
   target="$(prompt 'Where should Grishcord be located?' "$default_target")"
@@ -46,7 +46,7 @@ provision_repo_checkout() {
     return 0
   fi
 
-  source_mode="$(prompt 'Repo source (local-archive/git)' 'local-archive')"
+  source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'local-archive')"
   case "$source_mode" in
     local-archive)
       source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcordgood.zip")"
@@ -71,6 +71,20 @@ provision_repo_checkout() {
           git clone --depth 1 "$source" "$target"
         fi
       fi
+      ;;
+    wget|curl)
+      require_bin tar
+      archive_url="$(prompt 'Grishcord archive URL (.tar.gz)' 'https://github.com/example/grishcord/archive/refs/heads/main.tar.gz')"
+      source="$(mktemp /tmp/grishcord-src.XXXXXX.tar.gz)"
+      if [[ "$source_mode" == "wget" ]]; then
+        require_bin wget
+        wget -O "$source" "$archive_url"
+      else
+        require_bin curl
+        curl -fL --retry 3 --connect-timeout 10 -o "$source" "$archive_url"
+      fi
+      tar -xzf "$source" -C "$target"
+      rm -f "$source"
       ;;
     *) err "invalid repo source: $source_mode"; exit 1 ;;
   esac
@@ -133,15 +147,6 @@ set_env_key() {
 
   err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
   exit 1
-}
-
-login_admin() {
-  local base_url="$1"
-  local payload
-  payload=$(printf '{"username":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD")
-  local status
-  status=$(curl -sS -o /tmp/grish_login.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
-  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status): $(cat /tmp/grish_login.json 2>/dev/null || true)"; exit 1; }
 }
 
 write_install_env() {
@@ -280,8 +285,7 @@ configure_ai() {
     warn "Bot user may already exist; continuing with profile update/login checks."
   fi
 
-  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR"
-
+  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR
   set_env_key BOT_USERNAME "$BOT_USERNAME"
   set_env_key BOT_PASSWORD "$BOT_PASSWORD"
   set_env_key BOT_DISPLAY_NAME "$BOT_DISPLAY_NAME"
