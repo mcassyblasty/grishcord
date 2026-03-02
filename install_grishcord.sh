@@ -145,8 +145,60 @@ set_env_key() {
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
 
-  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
-  exit 1
+}
+
+
+validate_required_env() {
+  local caddy_site
+  caddy_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
+  if [[ -z "${caddy_site// }" ]]; then
+    err "CADDY_SITE_ADDRESS is required in $ENV_FILE. Set it to your public hostname (no scheme/path)."
+    exit 1
+  fi
+}
+
+normalize_database_url() {
+  local db_url rewritten
+  db_url="$(get_env_key DATABASE_URL || true)"
+  [[ -n "$db_url" ]] || return 0
+
+  rewritten="$db_url"
+  rewritten="${rewritten//@localhost:/@postgres:}"
+  rewritten="${rewritten//@127.0.0.1:/@postgres:}"
+  rewritten="${rewritten//@localhost\//@postgres/}"
+  rewritten="${rewritten//@127.0.0.1\//@postgres/}"
+
+  if [[ "$rewritten" != "$db_url" ]]; then
+    warn "DATABASE_URL used localhost/127.0.0.1; rewriting host to postgres for Docker Compose networking."
+    set_env_key DATABASE_URL "$rewritten"
+    return 0
+  fi
+
+  if [[ "$db_url" == *"localhost"* || "$db_url" == *"127.0.0.1"* ]]; then
+    err "DATABASE_URL appears to reference localhost/127.0.0.1 in an unsupported format. Please set host to postgres in $ENV_FILE."
+    exit 1
+  fi
+}
+
+ensure_host_bind_mount_dirs() {
+  local dirs=(/mnt/grishcord/postgres /mnt/grishcord/uploads)
+  local d
+  for d in "${dirs[@]}"; do
+    if [[ ! -d "$d" ]]; then
+      mkdir -p "$d" || { err "Failed to create required bind-mount directory: $d"; exit 1; }
+      log "Created bind-mount directory: $d"
+    fi
+    chmod 775 "$d" 2>/dev/null || warn "Could not set permissions on $d (continuing)."
+    if [[ ! -w "$d" ]]; then
+      warn "Directory is not writable by current user: $d (Docker may fail to write)."
+    fi
+  done
+}
+
+preflight_compose_sanity() {
+  validate_required_env
+  normalize_database_url
+  ensure_host_bind_mount_dirs
 }
 
 write_install_env() {
@@ -354,6 +406,8 @@ main() {
     set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
   fi
 
+  preflight_compose_sanity
+
   log "Starting/upgrading core compose services"
   docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans postgres backend frontend caddy
 
@@ -388,4 +442,6 @@ Next steps:
 SUMMARY
 }
 
-main "$@"
+if [[ "${GRISHCORD_INSTALL_LIB_ONLY:-0}" != "1" ]]; then
+  main "$@"
+fi
