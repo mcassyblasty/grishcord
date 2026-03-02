@@ -40,6 +40,18 @@ export class GrishcordClient {
     return this.#request(`/api/messages/since/0?channelId=${Number(channelId)}`);
   }
 
+
+  async getDmMessages(dmPeerId) {
+    return this.#request(`/api/messages/since/0?dmPeerId=${Number(dmPeerId)}`);
+  }
+
+  async postDmReply(dmPeerId, replyToId, body) {
+    return this.#request('/api/messages', {
+      method: 'POST',
+      body: { dmPeerId: Number(dmPeerId), replyToId: Number(replyToId), body }
+    });
+  }
+
   async postReply(channelId, replyToId, body) {
     return this.#request('/api/messages', {
       method: 'POST',

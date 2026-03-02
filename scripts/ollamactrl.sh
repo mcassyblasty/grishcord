@@ -8,7 +8,7 @@ DEFAULT_BIND_MODE="secure"
 
 usage() {
   cat <<USAGE
-Usage: ./scripts/ollamactrl.sh <command>
+Usage: ./scripts/ollamactrl.sh <command> [--bind-mode secure|docker]
 
 Commands:
   install   Install/update Ollama, configure model path + bind mode, pull a model
@@ -142,6 +142,10 @@ pull_model() {
 
 prompt_bind_mode() {
   local current_mode="$1"
+  if [[ -n "${BIND_MODE_OVERRIDE:-}" ]]; then
+    echo "$BIND_MODE_OVERRIDE"
+    return 0
+  fi
   local answer
   echo "Choose Ollama networking mode:"
   echo "  1) secure (127.0.0.1:11434)"
@@ -238,6 +242,24 @@ cmd_stop() {
 
 main() {
   local cmd="${1:-help}"
+  shift || true
+
+  BIND_MODE_OVERRIDE=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bind-mode=*) BIND_MODE_OVERRIDE="${1#*=}"; shift ;;
+      --bind-mode) BIND_MODE_OVERRIDE="${2:-}"; shift 2 ;;
+      *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+    esac
+  done
+
+  if [[ -n "$BIND_MODE_OVERRIDE" ]]; then
+    case "$BIND_MODE_OVERRIDE" in
+      secure|docker) ;;
+      *) echo "Invalid --bind-mode value: $BIND_MODE_OVERRIDE" >&2; exit 2 ;;
+    esac
+  fi
+
   case "$cmd" in
     install) cmd_install ;;
     update) cmd_update ;;

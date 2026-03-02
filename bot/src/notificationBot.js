@@ -16,15 +16,15 @@ function toLlmMessage(row, botUserId) {
   return { role: who, content: `${name}: ${String(row.body || '').trim()}`.trim() };
 }
 
-class ChannelQueue {
+class ConversationQueue {
   constructor(maxConcurrency) {
     this.maxConcurrency = Math.max(1, Number(maxConcurrency || 1));
     this.inflight = new Map();
     this.queues = new Map();
   }
 
-  run(channelId, fn) {
-    const key = Number(channelId);
+  run(conversationKey, fn) {
+    const key = String(conversationKey);
     return new Promise((resolve, reject) => {
       const queue = this.queues.get(key) || [];
       queue.push({ fn, resolve, reject });
@@ -57,12 +57,13 @@ export class NotificationBot {
     this.client = client;
     this.ollama = ollama;
     this.botUserId = Number(botUserId);
-    this.lastReplyAtByChannel = new Map();
-    this.contextByChannel = new Map();
-    this.queue = new ChannelQueue(config.maxConcurrencyPerChannel);
+    this.lastReplyAtByConversation = new Map();
+    this.contextByConversation = new Map();
+    this.queue = new ConversationQueue(config.maxConcurrencyPerChannel);
   }
 
-  start() {
+  async start() {
+    await this.ollama.checkReachable();
     this.#connectWs();
   }
 
@@ -96,19 +97,50 @@ export class NotificationBot {
   }
 
   async #handleNotification(notification) {
-    if (notification.mode !== 'channel') return;
-    const title = String(notification.title || '').toLowerCase();
-    if (!title.includes('ping')) return;
+    const mode = String(notification.mode || '');
+    if (!['channel', 'dm'].includes(mode)) return;
+
+    if (mode === 'channel') {
+      const title = String(notification.title || '').toLowerCase();
+      if (!title.includes('ping')) return;
+    }
+
     const messageId = Number(notification.messageId || 0);
     if (!Number.isFinite(messageId) || messageId <= 0) return;
 
     const target = await this.client.getMessageTarget(messageId);
-    if (!target?.channelId || target?.dmPeerId) return;
-    const channelId = Number(target.channelId);
-    if (!Number.isFinite(channelId) || channelId <= 0) return;
 
-    await this.queue.run(channelId, async () => {
-      const lastAt = this.lastReplyAtByChannel.get(channelId) || 0;
+    if (mode === 'dm') {
+      const dmPeerId = Number(target?.dmPeerId || notification.dmPeerId || 0);
+      if (!Number.isFinite(dmPeerId) || dmPeerId <= 0) return;
+      const conversationKey = `dm:${dmPeerId}`;
+      await this.queue.run(conversationKey, async () => {
+        const lastAt = this.lastReplyAtByConversation.get(conversationKey) || 0;
+        if (nowMs() - lastAt < this.config.rateLimitMs) return;
+
+        const rows = await this.client.getDmMessages(dmPeerId);
+        const trigger = rows.find((r) => Number(r.id) === messageId);
+        if (!trigger) return;
+        if (Number(trigger.author_id) === this.botUserId) return;
+
+        const llmMessages = await this.#buildMessages(conversationKey, rows, trigger);
+        const raw = await this.ollama.generate(llmMessages);
+        const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
+        if (!safe) return;
+
+        await this.client.postDmReply(dmPeerId, messageId, safe);
+        this.lastReplyAtByConversation.set(conversationKey, nowMs());
+        this.#remember(conversationKey, { role: 'assistant', content: safe });
+      });
+      return;
+    }
+
+    const channelId = Number(target?.channelId || notification.channelId || 0);
+    if (!Number.isFinite(channelId) || channelId <= 0) return;
+    const conversationKey = `channel:${channelId}`;
+
+    await this.queue.run(conversationKey, async () => {
+      const lastAt = this.lastReplyAtByConversation.get(conversationKey) || 0;
       if (nowMs() - lastAt < this.config.rateLimitMs) return;
 
       const rows = await this.client.getChannelMessages(channelId);
@@ -116,29 +148,27 @@ export class NotificationBot {
       if (!trigger) return;
       if (Number(trigger.author_id) === this.botUserId) return;
 
-      const llmMessages = await this.#buildMessages(channelId, rows, trigger);
+      const llmMessages = await this.#buildMessages(conversationKey, rows, trigger);
       const raw = await this.ollama.generate(llmMessages);
       const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
       if (!safe) return;
 
       await this.client.postReply(channelId, messageId, safe);
-      this.lastReplyAtByChannel.set(channelId, nowMs());
-      this.#remember(channelId, { role: 'assistant', content: safe });
+      this.lastReplyAtByConversation.set(conversationKey, nowMs());
+      this.#remember(conversationKey, { role: 'assistant', content: safe });
     });
   }
 
-  async #buildMessages(channelId, rows, trigger) {
+  async #buildMessages(conversationKey, rows, trigger) {
     const systemPrompt = fs.readFileSync(this.config.promptFile, 'utf8');
-    const cKey = Number(channelId);
-    const cache = this.contextByChannel.get(cKey);
+    const cache = this.contextByConversation.get(conversationKey);
     const expired = !cache || nowMs() - cache.lastTouchedAt > this.config.convoTtlMs;
 
     let turns = [];
     if (!expired && Array.isArray(cache.turns)) {
       turns = cache.turns.slice(-this.config.contextMaxMessages);
     } else {
-      const recent = rows.slice(-this.config.contextMaxMessages).map((r) => toLlmMessage(r, this.botUserId));
-      turns = recent;
+      turns = rows.slice(-this.config.contextMaxMessages).map((r) => toLlmMessage(r, this.botUserId));
     }
 
     const promptMessages = [
@@ -147,17 +177,17 @@ export class NotificationBot {
       { role: 'user', content: `${trigger.display_name || trigger.username || 'user'}: ${String(trigger.body || '')}` }
     ];
 
-    this.#remember(cKey, promptMessages.filter((m) => m.role !== 'system').slice(-this.config.contextMaxMessages));
+    this.#remember(conversationKey, promptMessages.filter((m) => m.role !== 'system').slice(-this.config.contextMaxMessages));
     return promptMessages;
   }
 
-  #remember(channelId, newTurnOrTurns) {
-    const key = Number(channelId);
-    const curr = this.contextByChannel.get(key);
+  #remember(conversationKey, newTurnOrTurns) {
+    const key = String(conversationKey);
+    const curr = this.contextByConversation.get(key);
     const nextTurns = Array.isArray(newTurnOrTurns)
       ? newTurnOrTurns
       : [...(curr?.turns || []), newTurnOrTurns];
-    this.contextByChannel.set(key, {
+    this.contextByConversation.set(key, {
       turns: nextTurns.slice(-this.config.contextMaxMessages),
       lastTouchedAt: nowMs()
     });

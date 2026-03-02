@@ -6,6 +6,21 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 - `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
 - If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
 - Installer records update metadata in `.grishcord-install.env` so `grishcordctl.sh update-start` can update source code before rebuilding.
+- `./scripts/installGrishcord.sh` (full local deployment bootstrap: root admin + optional AI + optional UFW adjustments)
+
+### `./scripts/installGrishcord.sh` interactive bootstrap
+The installer asks for:
+- Root admin username
+- Root admin display name
+- Root admin password (hidden input)
+- Optional AI enablement (Ollama + bot account)
+- If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
+- If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
+
+It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
+
+Re-run safely at any time:
+- `./scripts/installGrishcord.sh`
 
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
@@ -59,8 +74,8 @@ The AI bot runs as a separate service (`bot/`) and authenticates like a regular 
 
 ### Hard trigger gate behavior
 - The bot listens to WebSocket `notification` events only.
-- It only reacts to notification events in server channels (`mode=channel`), which correspond to mention/reply notifications.
-- It ignores all DM notifications (`mode=dm`).
+- In server channels (`mode=channel`), it reacts only to ping/reply-style notifications.
+- In DMs (`mode=dm`), it treats incoming DM notifications as valid triggers and replies in that DM.
 - It does **not** scan raw message firehose events for triggers.
 
 ### Configure Ollama on the host VM
@@ -92,6 +107,7 @@ Use:
 The bot compose service is already configured with `extra_hosts: ["host.docker.internal:host-gateway"]` and defaults to `OLLAMA_BASE_URL=http://host.docker.internal:11434`.
 
 `ollamactrl` now waits for the Ollama API to become ready before model pulls, reducing restart/pull race failures.
+The bot also performs an Ollama preflight (`GET /api/tags`) at startup and before first generation, and logs actionable firewall guidance if unreachable.
 
 ### Configure bot identity/runtime defaults
 Use:
@@ -143,5 +159,10 @@ Optional:
 2. In a server text channel, send a normal message with no mention/reply: bot should **not** respond.
 3. Ping `@<bot_username>` in a server channel: bot should respond as a **reply** to that message.
 4. Reply to the bot’s message in a server channel: bot should respond.
-5. Send a DM to the bot account: bot should **not** respond.
+5. Send a DM to the bot account: bot should respond in that DM.
 6. Wait longer than `BOT_CONVO_TTL_MS` (default 15 minutes), then ping again: bot should treat it as a fresh context and avoid referencing expired conversation memory.
+
+## Root admin protection
+- The installer sets `ADMIN_USERNAME` in `.env` to the chosen root admin username.
+- Backend enforces this root admin as non-demotable/non-deletable through admin APIs.
+- Other admins cannot revoke root-admin authority server-side.

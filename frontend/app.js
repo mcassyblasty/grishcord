@@ -831,7 +831,7 @@ async function loadPersistentNotifications() {
 }
 
 
-function isAtBottom(el, threshold = 24) {
+function isAtBottom(el, threshold = 2) {
   if (!el) return true;
   const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
   return remaining <= threshold;
@@ -846,9 +846,11 @@ function latestNotificationForCurrentTarget() {
   const list = Array.isArray(state.notifications) ? state.notifications : [];
   const matches = list.filter((n) => {
     if (state.mode === 'channel') {
+      if (!Number.isFinite(Number(state.activeChannelId)) || Number(state.activeChannelId) <= 0) return false;
       return n.mode === 'channel' && Number(n.channelId) === Number(state.activeChannelId);
     }
     if (state.mode === 'dm') {
+      if (!Number.isFinite(Number(state.activeDmPeerId)) || Number(state.activeDmPeerId) <= 0) return false;
       return n.mode === 'dm' && Number(n.dmPeerId) === Number(state.activeDmPeerId);
     }
     return false;
@@ -869,9 +871,11 @@ function focusLatestNotificationAtBottom() {
   if (!latest) return false;
   const id = Number(latest.messageId || latest.id || 0);
   if (!id) return false;
-  const node = $('msgs').querySelector(`[data-message-id="${id}"]`);
+  const msgsEl = $('msgs');
+  const node = msgsEl.querySelector(`[data-message-id="${id}"]`);
   if (!node) return false;
-  node.scrollIntoView({ block: 'end', behavior: 'auto' });
+  const targetTop = Math.max(0, node.offsetTop + node.offsetHeight - msgsEl.clientHeight);
+  msgsEl.scrollTop = targetTop;
   node.classList.add('flash');
   setTimeout(() => node.classList.remove('flash'), 1200);
   return true;

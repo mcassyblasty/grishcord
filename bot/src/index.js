@@ -23,7 +23,7 @@ async function main() {
 
   const ollama = new OllamaClient(config.ollamaBaseUrl, config.ollamaModel, config.ollamaTimeoutMs);
   const bot = new NotificationBot({ config, client, ollama, botUserId: me.id });
-  bot.start();
+  await bot.start();
 }
 
 main().catch((err) => {

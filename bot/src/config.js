@@ -38,7 +38,13 @@ export function loadConfig() {
   const ollamaFile = process.env.OLLAMA_CONFIG_FILE || '/config/.ollama.env';
   const mergedFileEnv = { ...parseEnvFile(ollamaFile), ...parseEnvFile(aibotFile) };
 
-  const get = (key) => process.env[key] || mergedFileEnv[key] || DEFAULTS[key] || '';
+  const get = (key) => {
+    const rawEnv = process.env[key];
+    if (rawEnv !== undefined && String(rawEnv).trim() !== '') return rawEnv;
+    const fromFile = mergedFileEnv[key];
+    if (fromFile !== undefined && String(fromFile).trim() !== '') return fromFile;
+    return DEFAULTS[key] || '';
+  };
 
   const cfg = {
     grishcordBaseUrl: get('GRISHCORD_BASE_URL'),
