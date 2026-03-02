@@ -10,6 +10,7 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 
 ### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
+- If repo root is not detected, where Grishcord should be located and whether to use a local archive or git source
 - Root admin username
 - Root admin display name
 - Root admin password (hidden input)

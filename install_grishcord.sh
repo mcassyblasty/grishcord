@@ -26,6 +26,70 @@ prompt_secret() {
 
 require_bin(){ command -v "$1" >/dev/null 2>&1 || { err "missing required binary: $1"; exit 1; }; }
 
+is_repo_dir() {
+  local d="$1"
+  [[ -n "$d" && -f "$d/docker-compose.yml" && -d "$d/backend" && -d "$d/scripts" ]]
+}
+
+provision_repo_checkout() {
+  local default_target="${HOME:-$PWD}/grishcord"
+  local target source_mode source
+
+  warn "Grishcord repo root was not found automatically."
+  target="$(prompt 'Where should Grishcord be located?' "$default_target")"
+  mkdir -p "$target"
+
+  if is_repo_dir "$target"; then
+    APP_DIR="$target"
+    ENV_FILE="$APP_DIR/.env"
+    INSTALL_ENV_FILE="$APP_DIR/.install.env"
+    return 0
+  fi
+
+  source_mode="$(prompt 'Repo source (local-archive/git)' 'local-archive')"
+  case "$source_mode" in
+    local-archive)
+      source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcordgood.zip")"
+      [[ -f "$source" ]] || { err "archive file not found: $source"; exit 1; }
+      if [[ "$source" == *.zip ]]; then
+        require_bin unzip
+        unzip -oq "$source" -d "$target"
+      else
+        require_bin tar
+        tar -xzf "$source" -C "$target"
+      fi
+      ;;
+    git)
+      require_bin git
+      source="$(prompt 'Grishcord git URL' 'https://github.com/example/grishcord.git')"
+      if [[ -d "$target/.git" ]]; then
+        git -C "$target" pull --ff-only
+      else
+        if [[ -n "$(find "$target" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+          warn "Target directory not empty; using existing contents."
+        else
+          git clone --depth 1 "$source" "$target"
+        fi
+      fi
+      ;;
+    *) err "invalid repo source: $source_mode"; exit 1 ;;
+  esac
+
+  if ! is_repo_dir "$target"; then
+    local nested
+    nested="$(find "$target" -mindepth 1 -maxdepth 2 -type f -name docker-compose.yml -printf '%h
+' | head -n1 || true)"
+    if [[ -n "$nested" ]] && is_repo_dir "$nested"; then
+      target="$nested"
+    fi
+  fi
+
+  is_repo_dir "$target" || { err "Could not prepare a valid Grishcord repo at $target"; exit 1; }
+  APP_DIR="$target"
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
+}
+
 resolve_app_dir() {
   local script_dir pwd_dir home_dir candidate
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +98,7 @@ resolve_app_dir() {
 
   for candidate in "$script_dir" "$pwd_dir" "$home_dir"; do
     [[ -n "$candidate" ]] || continue
-    if [[ -f "$candidate/docker-compose.yml" && -d "$candidate/backend" && -d "$candidate/scripts" ]]; then
+    if is_repo_dir "$candidate"; then
       APP_DIR="$candidate"
       ENV_FILE="$APP_DIR/.env"
       INSTALL_ENV_FILE="$APP_DIR/.install.env"
@@ -42,9 +106,7 @@ resolve_app_dir() {
     fi
   done
 
-  err "Could not locate Grishcord repo root (missing docker-compose.yml/backend/scripts)."
-  err "Run this script from inside the Grishcord repo, or place it in the repo root."
-  exit 1
+  provision_repo_checkout
 }
 
 load_install_env(){ [[ -f "$INSTALL_ENV_FILE" ]] && source "$INSTALL_ENV_FILE" || true; }
@@ -68,6 +130,18 @@ set_env_key() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+
+  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  exit 1
+}
+
+login_admin() {
+  local base_url="$1"
+  local payload
+  payload=$(printf '{"username":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD")
+  local status
+  status=$(curl -sS -o /tmp/grish_login.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
+  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status): $(cat /tmp/grish_login.json 2>/dev/null || true)"; exit 1; }
 }
 
 write_install_env() {
