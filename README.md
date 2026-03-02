@@ -6,13 +6,14 @@ Minimal private Discord-like web app scaffold with Docker Compose, Postgres, Liv
 - `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
 - If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
 - Installer records update metadata in `.grishcord-install.env` so `grishcordctl.sh update-start` can update source code before rebuilding.
-- `./scripts/installGrishcord.sh` (full local deployment bootstrap: root admin + optional AI + optional UFW adjustments)
+- `./install_grishcord.sh` (full local deployment bootstrap: root admin + optional AI + optional UFW adjustments)
 
-### `./scripts/installGrishcord.sh` interactive bootstrap
+### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
 - Root admin username
 - Root admin display name
 - Root admin password (hidden input)
+- Whether the existing DB already has an admin account (for reinstalling against existing DB data)
 - Optional AI enablement (Ollama + bot account)
 - If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
@@ -20,7 +21,7 @@ The installer asks for:
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
 
 Re-run safely at any time:
-- `./scripts/installGrishcord.sh`
+- `./install_grishcord.sh`
 
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
