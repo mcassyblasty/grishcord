@@ -32,7 +32,6 @@ Re-run safely at any time:
 - `./scripts/grishcordctl.sh status` (compose status + LAN URL)
 - `./scripts/grishcordctl.sh logs` (recent stack logs)
 - `./scripts/grishcordctl.sh doctor` (check prerequisites + compose diagnostics)
-- `./scripts/run_grishcord.sh [command]` (compat wrapper; default `start`)
 
 ## Docs
 - `docs/GRISHCORD_SPEC.tex`

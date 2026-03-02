@@ -4,8 +4,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 INSERT INTO app_settings(key, value)
-VALUES ('anti_spam_level', '5'::jsonb), ('voice_bitrate', '32000'::jsonb), ('voice_enabled', 'true'::jsonb)
+VALUES ('anti_spam_level', '5'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+DELETE FROM app_settings WHERE key LIKE 'voice%';
 
 CREATE TABLE IF NOT EXISTS users (
   id bigserial PRIMARY KEY,
@@ -54,8 +56,9 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
+UPDATE channels SET kind = 'text' WHERE kind IS DISTINCT FROM 'text';
 ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_kind_check;
-ALTER TABLE channels ADD CONSTRAINT channels_kind_check CHECK (kind IN ('text', 'voice'));
+ALTER TABLE channels ADD CONSTRAINT channels_kind_check CHECK (kind = 'text');
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS announcement_only boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS messages (
