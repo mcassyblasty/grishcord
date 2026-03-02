@@ -90,9 +90,9 @@ provision_repo_checkout() {
   esac
 
   if ! is_repo_dir "$target"; then
-    local nested
-    nested="$(find "$target" -mindepth 1 -maxdepth 2 -type f -name docker-compose.yml -printf '%h
-' | head -n1 || true)"
+    local nested nested_compose
+    nested_compose="$(find "$target" -mindepth 1 -maxdepth 2 -type f -name docker-compose.yml | head -n1 || true)"
+    nested="$(dirname "$nested_compose" 2>/dev/null || true)"
     if [[ -n "$nested" ]] && is_repo_dir "$nested"; then
       target="$nested"
     fi
@@ -285,7 +285,8 @@ configure_ai() {
     warn "Bot user may already exist; continuing with profile update/login checks."
   fi
 
-  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR
+  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR"
+
   set_env_key BOT_USERNAME "$BOT_USERNAME"
   set_env_key BOT_PASSWORD "$BOT_PASSWORD"
   set_env_key BOT_DISPLAY_NAME "$BOT_DISPLAY_NAME"
