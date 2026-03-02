@@ -229,6 +229,10 @@ function userCanAdmin(user) {
   return Boolean(user && (user.username === ADMIN_USERNAME || user.is_admin));
 }
 
+function isRootAdminUsername(username) {
+  return String(username || '') === String(ADMIN_USERNAME || '');
+}
+
 function adminOnly(req, res, next) {
   if (!userCanAdmin(req.userDb)) return res.status(403).json({ error: 'admin_only' });
   next();
@@ -276,6 +280,23 @@ app.post('/api/register', authRateLimit({ windowMs: 10 * 60 * 1000, max: 8, bloc
   const user = await pool.query('INSERT INTO users (username, display_name, display_color, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [username, displayName, randomDisplayColor(), pw]);
   await pool.query('UPDATE invites SET used_by = $1, used_at = now() WHERE id = $2', [user.rows[0].id, rows[0].id]);
   res.json({ ok: true });
+});
+
+app.post('/api/bootstrap/root', authRateLimit({ windowMs: 10 * 60 * 1000, max: 10, blockMs: 20 * 60 * 1000, bucket: 'bootstrap_root' }), async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const displayName = String(req.body.displayName || '').trim() || username;
+  const password = String(req.body.password || '');
+  if (!username || !password) return res.status(400).json({ error: 'username_password_required' });
+
+  const existing = await pool.query('SELECT id FROM users ORDER BY id ASC LIMIT 1');
+  if (existing.rows[0]) return res.status(409).json({ error: 'already_initialized' });
+
+  const pw = await bcrypt.hash(password, 12);
+  const created = await pool.query(
+    'INSERT INTO users (username, display_name, display_color, password_hash, is_admin) VALUES ($1,$2,$3,$4,true) RETURNING id, username, display_name, is_admin',
+    [username, displayName, randomDisplayColor(), pw]
+  );
+  res.json({ ok: true, user: created.rows[0], rootAdminUsername: ADMIN_USERNAME });
 });
 
 app.post('/api/login', authRateLimit({ windowMs: 10 * 60 * 1000, max: 12, blockMs: 15 * 60 * 1000, bucket: 'login' }), async (req, res) => {
@@ -470,7 +491,7 @@ app.post('/api/admin/users/:id/admin', auth, enforceSessionVersion, adminOnly, a
   const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
   const user = u.rows[0];
   if (!user) return res.status(404).json({ error: 'not_found' });
-  if (user.username === ADMIN_USERNAME) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
+  if (isRootAdminUsername(user.username)) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
   await pool.query('UPDATE users SET is_admin = $1 WHERE id = $2', [isAdmin, id]);
   res.json({ ok: true });
 });
@@ -487,7 +508,7 @@ app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, 
   const user = u.rows[0];
   if (!user) return res.status(404).json({ error: 'not_found' });
   const ua = await pool.query('SELECT is_admin FROM users WHERE id = $1', [id]);
-  if (user.username === ADMIN_USERNAME || ua.rows[0]?.is_admin) return res.status(400).json({ error: 'cannot_delete_admin' });
+  if (isRootAdminUsername(user.username) || ua.rows[0]?.is_admin) return res.status(400).json({ error: 'cannot_delete_admin' });
   if (confirmUsername !== user.username) return res.status(400).json({ error: 'confirm_username_mismatch' });
 
   const client = await pool.connect();
