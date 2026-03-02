@@ -215,7 +215,7 @@ function humanError(err){
   if (msg === 'invalid_invite') return 'Invite token is invalid, expired, revoked, or already used.';
   if (msg === 'target_required') return 'Pick a channel or DM target first.';
   if (msg === 'name_required') return 'Channel name is required.';
-  if (msg === 'invalid_kind') return 'Channel type must be text or voice.';
+  if (msg === 'invalid_kind') return 'Channel type must be text.';
   if (msg === 'invalid_position') return 'Position must be a positive number.';
   if (msg === 'confirm_checkbox_required') return 'You must check the permanent-delete confirmation box.';
   if (msg === 'confirm_username_mismatch') return 'Typed username does not match exactly (case-sensitive).';
@@ -1092,8 +1092,6 @@ async function refreshAdmin(){
   const s = await api('/api/admin/state');
   state.allChannels = s.channels || [];
   $('spamLevel').value = String(s.antiSpamLevel);
-  $('voiceBitrate').value = String(s.voiceBitrate);
-  $('voiceEnabled').checked = s.voiceEnabled !== false;
   setSpamEffective(Number(s.antiSpamLevel));
   // Invite list is no longer rendered inline; CSV export is available instead.
 
@@ -1598,11 +1596,13 @@ function renderNavLists(){
     cl.appendChild(row);
   }
 
-  const vl = $('voiceList'); vl.textContent='';
+  const vl = $('voiceList');
   const voiceChannels = navChannels.filter((x) => x.kind === 'voice');
+  if (vl) vl.textContent='';
   $('voiceHeader')?.classList.toggle('hidden', voiceChannels.length === 0);
   $('voiceSpacer')?.classList.toggle('hidden', voiceChannels.length === 0);
   for (const c of voiceChannels) {
+    if (!vl) break;
     const row = document.createElement('div');
     row.className = 'chanRow';
     row.dataset.channelId = String(c.id);
@@ -2033,7 +2033,6 @@ async function boot(){
   };
 
   $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar('text');
-  $('addVoiceChannelBtn').onclick = ()=> createChannelFromSidebar('voice');
 
   const setAuthAuxMode = (mode = 'none') => {
     const registerOpen = mode === 'register';
@@ -2214,7 +2213,7 @@ async function boot(){
   $('spamLevel').onchange = ()=> setSpamEffective(Number($('spamLevel').value));
   $('saveSettingsBtn').onclick = async()=>{
     try {
-      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value),voiceBitrate:Number($('voiceBitrate').value),voiceEnabled:$('voiceEnabled').checked});
+      const r = await api('/api/admin/settings','POST',{antiSpamLevel:Number($('spamLevel').value)});
       setSpamEffective(Number(r.antiSpamLevel));
       await refreshChannels();
     } catch(err){ showError(`Settings save failed: ${humanError(err)}`); }
