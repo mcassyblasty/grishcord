@@ -358,10 +358,12 @@ update_start_stack() {
 
 restart_stack() {
   run_with_timer "compose restart" compose_cmd restart
+  run_with_timer "bot module reload (recreate bot)" compose_cmd up -d --no-deps --force-recreate bot
   wait_for_service postgres 180
   wait_for_service backend 180
   wait_for_service frontend 120
   wait_for_service caddy 120
+  wait_for_service bot 120
   wait_for_http "http://127.0.0.1:$(get_caddy_port)/api/version" 120
   verify_local_https_route
   show_status
