@@ -130,6 +130,18 @@ set_env_key() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+
+  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  exit 1
+}
+
+login_admin() {
+  local base_url="$1"
+  local payload
+  payload=$(printf '{"username":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD")
+  local status
+  status=$(curl -sS -o /tmp/grish_login.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
+  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status): $(cat /tmp/grish_login.json 2>/dev/null || true)"; exit 1; }
 }
 
 write_install_env() {
