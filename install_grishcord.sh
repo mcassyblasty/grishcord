@@ -265,11 +265,33 @@ ufw_allow_docker_to_ollama() {
   warn "Firewall guidance: keep tcp/11434 restricted to local/docker networks; do not expose publicly."
 }
 
+
+write_aibot_env() {
+  local model="${1:-}"
+  if [[ -z "$model" && -f "$APP_DIR/.ollama.env" ]]; then
+    model="$(awk -F= '/^OLLAMA_MODEL=/{print substr($0,index($0,"=")+1)}' "$APP_DIR/.ollama.env" | tail -n1)"
+  fi
+  model="${model:-gemma3:4b}"
+  cat > "$APP_DIR/.aibot.env" <<ENV
+BOT_USERNAME=$BOT_USERNAME
+BOT_DISPLAY_NAME=$BOT_DISPLAY_NAME
+BOT_COLOR=$BOT_COLOR
+OLLAMA_MODEL=$model
+BOT_CONVO_TTL_MS=900000
+ENV
+  chmod 600 "$APP_DIR/.aibot.env" 2>/dev/null || true
+  set_env_key OLLAMA_MODEL "$model"
+}
+
 configure_ai() {
   local base_url="$1"
   read -r -p "Do you want to install and enable AI (Ollama + GrishBot)? [y/N]: " ans
   ans="${ans:-N}"
-  if [[ ! "$ans" =~ ^[Yy]$ ]]; then ENABLE_AI="false"; return 0; fi
+  if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+    ENABLE_AI="false"
+    docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" stop bot >/dev/null 2>&1 || true
+    return 0
+  fi
   ENABLE_AI="true"
 
   "$APP_DIR/scripts/ollamactrl.sh" install
@@ -292,6 +314,7 @@ configure_ai() {
   set_env_key BOT_DISPLAY_NAME "$BOT_DISPLAY_NAME"
   set_env_key BOT_COLOR "$BOT_COLOR"
   set_env_key OLLAMA_BASE_URL "http://host.docker.internal:11434"
+  write_aibot_env
 
   ufw_allow_docker_to_ollama
 
@@ -331,8 +354,8 @@ main() {
     set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
   fi
 
-  log "Starting/upgrading compose stack"
-  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans
+  log "Starting/upgrading core compose services"
+  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans postgres backend frontend caddy
 
   if ! wait_http_ok "http://127.0.0.1:3000/health" 80; then
     err "Backend health check failed at http://127.0.0.1:3000/health"
