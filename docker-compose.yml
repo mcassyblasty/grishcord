@@ -28,7 +28,7 @@ services:
       UPLOADS_DIR: /mnt/grishcord/uploads
       RETENTION_THRESHOLD_PCT: ${RETENTION_THRESHOLD_PCT}
       RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS}
-      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES}
     volumes:
       - /mnt/grishcord/uploads:/mnt/grishcord/uploads
       - ./VERSION:/app/VERSION:ro

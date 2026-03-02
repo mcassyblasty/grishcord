@@ -170,7 +170,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 
 ## [0.3.37] - 2026-02-17
 ### Changed
-- In Admin Mode, the sidebar now renders the full channel inventory (including hidden/archived channels) for both text and voice sections.
 - Added per-channel inline `On`/`Off` buttons in Admin Mode to quickly toggle channel visibility without opening the three-dot menu.
 
 ## [0.3.36] - 2026-02-17
@@ -187,7 +186,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ## [0.3.34] - 2026-02-17
 ### Changed
 - Simplified delegated roles back to admin-only controls in Admin Settings: removed moderator role toggles and role API usage from the Users panel.
-- Added a global `Enable voice channels` admin setting and wired channel loading to hide all voice channels when disabled.
 - Improved Admin Users layout and channel action-menu anchoring/alignment to reduce UI chaos and make three-dot channel actions reliably clickable.
 
 ### Fixed
@@ -203,7 +201,7 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 
 ## [0.3.32] - 2026-02-17
 ### Changed
-- Reordered Admin Settings cards to: Admin Mode, Create Invite Key, Generate Recovery Key, Anti-Spam/Bitrate, Users, then Invites export.
+- Reordered Admin Settings cards to: Admin Mode, Create Invite Key, Generate Recovery Key, Anti-Spam, Users, then Invites export.
 - Replaced inline invite-history rendering with CSV export (`Download Invites CSV`) in Admin Settings.
 - Added role escalation controls for both `moderator` and `admin` in the Users section.
 
@@ -233,7 +231,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ### Changed
 - Admin access now supports multiple admins: the primary hard-coded admin remains authoritative, and additional admins can be toggled from Admin Settings with an `is admin` checkbox per user.
 - Replaced blocking browser `alert/confirm/prompt` flows in the app shell with themed non-blocking toasts and modal prompts for message/channel/admin actions.
-- Voice WebRTC setup now loads ICE server configuration from the backend (`/api/voice/config`) so deployments can provide TURN/STUN without client code edits.
 
 ### Fixed
 - Notifications are now persistent across refresh/session reconnects via backend-backed notification records instead of in-memory-only state.
@@ -260,13 +257,11 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 
 ## [0.3.24] - 2026-02-17
 ### Changed
-- Channel administration is now inline in the server sidebar when Admin Mode is enabled: add buttons appear next to Text/Voice headers, per-channel three-dot action menus are available on each row, and drag-and-drop reorder is supported for text and voice lists.
 - Deprecated the old modal-based channel editor card in favor of in-context sidebar controls for admin channel management.
 
 ## [0.3.23] - 2026-02-16
 ### Fixed
 - Composer placeholder text is now mobile-aware: portrait/mobile views show the shorter `Plain-text message` prompt instead of desktop keyboard guidance text.
-- Composer placeholder now re-evaluates on viewport resize while remaining compatible with mode-specific placeholders (e.g., voice-disabled state).
 
 ## [0.3.22] - 2026-02-16
 ### Fixed
@@ -279,7 +274,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 - Clicking a notification now consumes/removes that notification entry from the notifications list after navigation.
 - Mobile composer input height is now constrained to match the action-button row height for improved usability on narrow screens.
 - Top-bar mobile responsiveness improved so notification/settings controls fit better in constrained widths.
-- Voice channel section header/spacer now hide automatically when no voice channels are available.
 
 ## [0.3.20] - 2026-02-16
 ### Added
@@ -301,7 +295,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ### Fixed
 - Improved mobile layout behavior so the top bar/settings control and bottom composer remain visible and usable across narrow/tall aspect ratios, with a more reliable slide-out sidebar overlay behavior.
 - Message action controls (reply/edit/delete) are now compact and positioned at the top-right of each message card for cleaner, less intrusive interaction.
-- Voice-room join/leave behavior is now more robust: voice channel buttons reflect current state (Join vs Leave), leaving a room resets navigation cleanly, and join errors now report actionable microphone availability/permission issues.
 
 ## [0.3.17] - 2026-02-16
 ### Added
@@ -314,7 +307,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ### Fixed
 - Eliminated Docker Compose APP_VERSION warning by removing the unset-required compose env reference and mounting `./VERSION` into backend at `/app/VERSION`.
 - Runtime version reporting is now robust: empty/unset `APP_VERSION` falls back to `VERSION` file with startup source logging (`env`, `file:*`, or fallback).
-- Voice join no longer throws on environments without `navigator.mediaDevices.getUserMedia`; it now enters a safe listen-only fallback.
 - Mobile composer visibility and sidebar-close behavior improved for narrow layouts.
 
 ### Added
@@ -326,7 +318,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ## [0.3.15] - 2026-02-16
 ### Fixed
 - DM rendering now applies strict conversation matching in realtime and history paths using explicit DM participant metadata, preventing cross-conversation visibility.
-- Voice join no longer crashes on browsers/origins where `getUserMedia` is unavailable; app falls back to listen-only join with a clear status note.
 - Mobile layout now keeps the composer visible more reliably in narrow viewports and closes the sidebar when selecting navigation targets or clicking outside.
 
 ### Added
@@ -360,11 +351,9 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 
 ## [0.3.11] - 2026-02-16
 ### Added
-- Added admin channel-management APIs and UI for channel editor workflows: create text/voice channels, rename channels, reorder channels, and archive channels from Admin Settings.
 - Added explicit Admin Mode toggle in Admin Settings; message delete controls are now shown only when Admin Mode is enabled.
 
 ### Changed
-- Sidebar now renders voice channels dynamically from backend channel data instead of fixed lobby buttons.
 - DM list refresh is now proactive (WebSocket-triggered + periodic polling) to surface new DM peers quickly without requiring a manual page reload.
 
 ## [0.3.10] - 2026-02-16
@@ -374,7 +363,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 
 ## [0.3.9] - 2026-02-16
 ### Added
-- Implemented real in-browser voice transmission for `lobby-a` and `lobby-b` using WebRTC audio with WebSocket signaling (join/leave, mute/unmute, peer connect/disconnect status).
 - Added admin message deletion support (`DELETE /api/messages/:id`) and wired delete controls in the message timeline for the admin account.
 
 ### Changed
@@ -392,7 +380,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ### Changed
 - Sidebar now lands on the server view with a compact `DMs` button to switch contexts instead of listing DMs above channels by default.
 - DMs list now appears in its own view and is sorted by most recent conversation activity (newest first).
-- Added a dedicated `VOICE CHANNELS` section under text channels with lobby buttons (`lobby-a`, `lobby-b`).
 
 ## [0.3.6] - 2026-02-16
 ### Changed
@@ -447,7 +434,6 @@ The format is inspired by Keep a Changelog and follows semantic-ish version tags
 ## [0.2.0] - 2026-02-16
 ### Added
 - Interactive frontend with login, registration via invite token, recovery redemption/reset, messaging, responsive layout, and theme toggle.
-- Admin panel UI for invite generation/revocation, recovery link generation, user enable/disable, anti-spam level selection, and voice bitrate configuration.
 - Backend admin endpoints for state retrieval, invite revoke, user disable/enable, and settings updates.
 
 ## [0.1.0] - 2026-02-16
