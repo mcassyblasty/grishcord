@@ -144,6 +144,9 @@ set_env_key() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+
+  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  exit 1
 }
 
 write_install_env() {
