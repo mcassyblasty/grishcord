@@ -144,6 +144,9 @@ set_env_key() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+
+  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  exit 1
 }
 
 write_install_env() {
@@ -282,8 +285,7 @@ configure_ai() {
     warn "Bot user may already exist; continuing with profile update/login checks."
   fi
 
-  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR"
-
+  ensure_user_profile "$base_url" "$BOT_USERNAME" "$BOT_PASSWORD" "$BOT_DISPLAY_NAME" "$BOT_COLOR
   set_env_key BOT_USERNAME "$BOT_USERNAME"
   set_env_key BOT_PASSWORD "$BOT_PASSWORD"
   set_env_key BOT_DISPLAY_NAME "$BOT_DISPLAY_NAME"
