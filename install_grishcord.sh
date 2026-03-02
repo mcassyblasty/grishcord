@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$APP_DIR/.env"
-INSTALL_ENV_FILE="$APP_DIR/.install.env"
+APP_DIR=""
+ENV_FILE=""
+INSTALL_ENV_FILE=""
 COOKIE_JAR="$(mktemp /tmp/grishcord-install-cookie.XXXXXX)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
 
@@ -25,6 +25,27 @@ prompt_secret() {
 }
 
 require_bin(){ command -v "$1" >/dev/null 2>&1 || { err "missing required binary: $1"; exit 1; }; }
+
+resolve_app_dir() {
+  local script_dir pwd_dir home_dir candidate
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  pwd_dir="$(pwd)"
+  home_dir="${HOME:-}/grishcord"
+
+  for candidate in "$script_dir" "$pwd_dir" "$home_dir"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -f "$candidate/docker-compose.yml" && -d "$candidate/backend" && -d "$candidate/scripts" ]]; then
+      APP_DIR="$candidate"
+      ENV_FILE="$APP_DIR/.env"
+      INSTALL_ENV_FILE="$APP_DIR/.install.env"
+      return 0
+    fi
+  done
+
+  err "Could not locate Grishcord repo root (missing docker-compose.yml/backend/scripts)."
+  err "Run this script from inside the Grishcord repo, or place it in the repo root."
+  exit 1
+}
 
 load_install_env(){ [[ -f "$INSTALL_ENV_FILE" ]] && source "$INSTALL_ENV_FILE" || true; }
 
@@ -206,6 +227,8 @@ configure_ai() {
 main() {
   require_bin docker
   require_bin curl
+  resolve_app_dir
+  log "Using repo directory: $APP_DIR"
 
   load_install_env
   ensure_env_file
