@@ -196,9 +196,7 @@ async function runMigrations() {
     SELECT x.name, x.kind, x.position, false
     FROM (VALUES
       ('general', 'text', 1),
-      ('random', 'text', 2),
-      ('lobby-a', 'voice', 10),
-      ('lobby-b', 'voice', 11)
+      ('random', 'text', 2)
     ) AS x(name, kind, position)
     WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.name = x.name AND c.kind = x.kind)
   `);
@@ -244,11 +242,6 @@ function sanitizeSpamLevel(v) {
   return null;
 }
 
-function sanitizeBitrate(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(16000, Math.min(64000, Math.round(n)));
-}
 
 function sessionCookieOptions(req) {
   const wantSecure = process.env.COOKIE_SECURE === 'true';
@@ -258,18 +251,6 @@ function sessionCookieOptions(req) {
 
 app.get('/health', (_req, res) => res.json({ ok: true, version: APP_VERSION }));
 app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
-
-app.get('/api/voice/config', auth, enforceSessionVersion, async (_req, res) => {
-  const raw = String(process.env.VOICE_ICE_SERVERS || '').trim();
-  let iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) iceServers = parsed;
-    } catch {}
-  }
-  res.json({ iceServers });
-});
 
 app.post('/api/register', authRateLimit({ windowMs: 10 * 60 * 1000, max: 8, blockMs: 20 * 60 * 1000, bucket: 'register' }), async (req, res) => {
   const { inviteToken, username, displayName, password } = req.body;
@@ -359,11 +340,8 @@ app.patch('/api/me/preferences', auth, enforceSessionVersion, async (req, res) =
 });
 
 app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
-  const settings = await pool.query('SELECT value FROM app_settings WHERE key = $1', ['voice_enabled']);
-  const voiceEnabled = settings.rows[0] ? settings.rows[0].value !== false : true;
   const { rows } = await pool.query(
-    'SELECT id, name, kind, position, announcement_only FROM channels WHERE archived=false AND ($1::boolean = true OR kind <> $2) ORDER BY kind ASC, position ASC, id ASC',
-    [voiceEnabled, 'voice']
+    "SELECT id, name, kind, position, announcement_only FROM channels WHERE archived=false AND kind = 'text' ORDER BY position ASC, id ASC"
   );
   res.json(rows);
 });
@@ -372,7 +350,7 @@ app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, async (r
   const name = String(req.body.name || '').trim();
   const kind = String(req.body.kind || 'text');
   if (!name) return res.status(400).json({ error: 'name_required' });
-  if (!['text', 'voice'].includes(kind)) return res.status(400).json({ error: 'invalid_kind' });
+  if (kind !== 'text') return res.status(400).json({ error: 'invalid_kind' });
   const pos = await pool.query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM channels WHERE kind = $1', [kind]);
   await pool.query('INSERT INTO channels(name, kind, position, archived, announcement_only) VALUES ($1, $2, $3, false, false)', [name, kind, Number(pos.rows[0].next)]);
   res.json({ ok: true });
@@ -433,7 +411,7 @@ app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req,
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
   const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, created_at FROM users ORDER BY id ASC');
   const channels = await pool.query('SELECT id, name, kind, position, archived, announcement_only FROM channels ORDER BY kind ASC, position ASC, id ASC');
-  const settings = await pool.query('SELECT key, value FROM app_settings WHERE key IN ($1, $2, $3)', ['anti_spam_level', 'voice_bitrate', 'voice_enabled']);
+  const settings = await pool.query('SELECT key, value FROM app_settings WHERE key = $1', ['anti_spam_level']);
   const settingMap = Object.fromEntries(settings.rows.map((r) => [r.key, r.value]));
   const level = Number(settingMap.anti_spam_level ?? 5);
   res.json({
@@ -441,9 +419,7 @@ app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req,
     users: users.rows,
     channels: channels.rows,
     antiSpamLevel: level,
-    antiSpamEffective: spamPresets[level] || spamPresets[5],
-    voiceBitrate: Number(settingMap.voice_bitrate ?? 32000),
-    voiceEnabled: settingMap.voice_enabled === undefined ? true : settingMap.voice_enabled !== false
+    antiSpamEffective: spamPresets[level] || spamPresets[5]
   });
 });
 
@@ -543,29 +519,14 @@ app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, 
 
 app.post('/api/admin/settings', auth, enforceSessionVersion, adminOnly, async (req, res) => {
   const level = sanitizeSpamLevel(req.body.antiSpamLevel);
-  const bitrate = sanitizeBitrate(req.body.voiceBitrate);
-  let voiceEnabled = null;
   if (level !== null) {
     await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['anti_spam_level', JSON.stringify(level)]);
-  }
-  if (bitrate !== null) {
-    await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['voice_bitrate', JSON.stringify(bitrate)]);
-  }
-  if (typeof req.body.voiceEnabled === 'boolean') {
-    await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['voice_enabled', JSON.stringify(req.body.voiceEnabled)]);
-    voiceEnabled = req.body.voiceEnabled;
-  }
-  if (voiceEnabled === null) {
-    const settings = await pool.query('SELECT value FROM app_settings WHERE key = $1', ['voice_enabled']);
-    voiceEnabled = settings.rows[0] ? settings.rows[0].value !== false : true;
   }
   const finalLevel = level ?? 5;
   res.json({
     ok: true,
     antiSpamLevel: finalLevel,
-    antiSpamEffective: spamPresets[finalLevel],
-    voiceBitrate: bitrate ?? 32000,
-    voiceEnabled
+    antiSpamEffective: spamPresets[finalLevel]
   });
 });
 
@@ -716,7 +677,7 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
   const created = await createNotificationsForMessage(enriched, req.userDb);
   for (const n of created) {
     for (const c of wss.clients) {
-      if (c.readyState !== 1 || Number(c.voice?.userId || 0) !== Number(n.user_id)) continue;
+      if (c.readyState !== 1 || Number(c.userId || 0) !== Number(n.user_id)) continue;
       c.send(JSON.stringify({
         type: 'notification',
         data: {
@@ -915,74 +876,22 @@ app.get('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
 });
 
 wss.on('connection', async (ws, req) => {
-  ws.voice = { userId: null, room: null, username: null };
+  ws.userId = null;
   try {
     const cookies = parseCookieHeader(req.headers.cookie || '');
     const raw = cookies.gc_session;
     if (raw) {
       const data = jwt.verify(raw, JWT_SECRET);
-      const { rows } = await pool.query('SELECT id, username, session_version, disabled FROM users WHERE id = $1', [data.sub]);
+      const { rows } = await pool.query('SELECT id, session_version, disabled FROM users WHERE id = $1', [data.sub]);
       const u = rows[0];
-      if (u && !u.disabled && u.session_version === data.sv) {
-        ws.voice.userId = Number(u.id);
-        ws.voice.username = u.username;
-      }
+      if (u && !u.disabled && u.session_version === data.sv) ws.userId = Number(u.id);
     }
   } catch {}
 
   ws.send(JSON.stringify({ type: 'hello' }));
 
-  ws.on('message', (buf) => {
-    let msg;
-    try { msg = JSON.parse(String(buf)); } catch { return; }
-    if (!ws.voice.userId) return;
-
-    if (msg.type === 'voice_join') {
-      const room = String(msg.room || '').slice(0, 64);
-      if (!room) return;
-      ws.voice.room = room;
-      for (const c of wss.clients) {
-        if (c === ws || c.readyState !== 1) continue;
-        if (c.voice?.room === room && c.voice?.userId) {
-          c.send(JSON.stringify({ type: 'voice_peer_joined', data: { userId: ws.voice.userId, username: ws.voice.username } }));
-          ws.send(JSON.stringify({ type: 'voice_peer_joined', data: { userId: c.voice.userId, username: c.voice.username } }));
-        }
-      }
-      return;
-    }
-
-    if (msg.type === 'voice_leave') {
-      const room = ws.voice.room;
-      ws.voice.room = null;
-      if (!room) return;
-      for (const c of wss.clients) {
-        if (c.readyState !== 1 || c.voice?.room !== room || c === ws) continue;
-        c.send(JSON.stringify({ type: 'voice_peer_left', data: { userId: ws.voice.userId } }));
-      }
-      return;
-    }
-
-    if (!['voice_offer', 'voice_answer', 'voice_ice'].includes(msg.type)) return;
-    const targetUserId = Number(msg.targetUserId);
-    if (!Number.isFinite(targetUserId)) return;
-    for (const c of wss.clients) {
-      if (c.readyState !== 1 || c.voice?.userId !== targetUserId) continue;
-      c.send(JSON.stringify({
-        type: msg.type,
-        data: { fromUserId: ws.voice.userId, fromUsername: ws.voice.username, sdp: msg.sdp, candidate: msg.candidate }
-      }));
-      break;
-    }
-  });
-
-  ws.on('close', () => {
-    const room = ws.voice?.room;
-    const userId = ws.voice?.userId;
-    if (!room || !userId) return;
-    for (const c of wss.clients) {
-      if (c.readyState !== 1 || c.voice?.room !== room || c === ws) continue;
-      c.send(JSON.stringify({ type: 'voice_peer_left', data: { userId } }));
-    }
+  ws.on('message', () => {
+    if (!ws.userId) return;
   });
 });
 

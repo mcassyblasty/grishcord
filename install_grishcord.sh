@@ -145,8 +145,60 @@ set_env_key() {
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
 
-  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
-  exit 1
+}
+
+
+validate_required_env() {
+  local caddy_site
+  caddy_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
+  if [[ -z "${caddy_site// }" ]]; then
+    err "CADDY_SITE_ADDRESS is required in $ENV_FILE. Set it to your public hostname (no scheme/path)."
+    exit 1
+  fi
+}
+
+normalize_database_url() {
+  local db_url rewritten
+  db_url="$(get_env_key DATABASE_URL || true)"
+  [[ -n "$db_url" ]] || return 0
+
+  rewritten="$db_url"
+  rewritten="${rewritten//@localhost:/@postgres:}"
+  rewritten="${rewritten//@127.0.0.1:/@postgres:}"
+  rewritten="${rewritten//@localhost\//@postgres/}"
+  rewritten="${rewritten//@127.0.0.1\//@postgres/}"
+
+  if [[ "$rewritten" != "$db_url" ]]; then
+    warn "DATABASE_URL used localhost/127.0.0.1; rewriting host to postgres for Docker Compose networking."
+    set_env_key DATABASE_URL "$rewritten"
+    return 0
+  fi
+
+  if [[ "$db_url" == *"localhost"* || "$db_url" == *"127.0.0.1"* ]]; then
+    err "DATABASE_URL appears to reference localhost/127.0.0.1 in an unsupported format. Please set host to postgres in $ENV_FILE."
+    exit 1
+  fi
+}
+
+ensure_host_bind_mount_dirs() {
+  local dirs=(/mnt/grishcord/postgres /mnt/grishcord/uploads)
+  local d
+  for d in "${dirs[@]}"; do
+    if [[ ! -d "$d" ]]; then
+      mkdir -p "$d" || { err "Failed to create required bind-mount directory: $d"; exit 1; }
+      log "Created bind-mount directory: $d"
+    fi
+    chmod 775 "$d" 2>/dev/null || warn "Could not set permissions on $d (continuing)."
+    if [[ ! -w "$d" ]]; then
+      warn "Directory is not writable by current user: $d (Docker may fail to write)."
+    fi
+  done
+}
+
+preflight_compose_sanity() {
+  validate_required_env
+  normalize_database_url
+  ensure_host_bind_mount_dirs
 }
 
 write_install_env() {
@@ -265,11 +317,33 @@ ufw_allow_docker_to_ollama() {
   warn "Firewall guidance: keep tcp/11434 restricted to local/docker networks; do not expose publicly."
 }
 
+
+write_aibot_env() {
+  local model="${1:-}"
+  if [[ -z "$model" && -f "$APP_DIR/.ollama.env" ]]; then
+    model="$(awk -F= '/^OLLAMA_MODEL=/{print substr($0,index($0,"=")+1)}' "$APP_DIR/.ollama.env" | tail -n1)"
+  fi
+  model="${model:-gemma3:4b}"
+  cat > "$APP_DIR/.aibot.env" <<ENV
+BOT_USERNAME=$BOT_USERNAME
+BOT_DISPLAY_NAME=$BOT_DISPLAY_NAME
+BOT_COLOR=$BOT_COLOR
+OLLAMA_MODEL=$model
+BOT_CONVO_TTL_MS=900000
+ENV
+  chmod 600 "$APP_DIR/.aibot.env" 2>/dev/null || true
+  set_env_key OLLAMA_MODEL "$model"
+}
+
 configure_ai() {
   local base_url="$1"
   read -r -p "Do you want to install and enable AI (Ollama + GrishBot)? [y/N]: " ans
   ans="${ans:-N}"
-  if [[ ! "$ans" =~ ^[Yy]$ ]]; then ENABLE_AI="false"; return 0; fi
+  if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+    ENABLE_AI="false"
+    docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" stop bot >/dev/null 2>&1 || true
+    return 0
+  fi
   ENABLE_AI="true"
 
   "$APP_DIR/scripts/ollamactrl.sh" install
@@ -292,6 +366,7 @@ configure_ai() {
   set_env_key BOT_DISPLAY_NAME "$BOT_DISPLAY_NAME"
   set_env_key BOT_COLOR "$BOT_COLOR"
   set_env_key OLLAMA_BASE_URL "http://host.docker.internal:11434"
+  write_aibot_env
 
   ufw_allow_docker_to_ollama
 
@@ -331,8 +406,10 @@ main() {
     set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
   fi
 
-  log "Starting/upgrading compose stack"
-  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans
+  preflight_compose_sanity
+
+  log "Starting/upgrading core compose services"
+  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans postgres backend frontend caddy
 
   if ! wait_http_ok "http://127.0.0.1:3000/health" 80; then
     err "Backend health check failed at http://127.0.0.1:3000/health"
@@ -365,4 +442,6 @@ Next steps:
 SUMMARY
 }
 
-main "$@"
+if [[ "${GRISHCORD_INSTALL_LIB_ONLY:-0}" != "1" ]]; then
+  main "$@"
+fi

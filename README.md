@@ -1,6 +1,6 @@
 # Grishcord
 
-Minimal private Discord-like web app scaffold with Docker Compose, Postgres, LiveKit, and coturn.
+Minimal private Discord-like web app scaffold with Docker Compose and Postgres.
 
 ## Install helper
 - `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
