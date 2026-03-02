@@ -245,9 +245,6 @@
       <div id="serverSections">
         <div id="textHeader" class="sectionHead"><div class="small">TEXT CHANNELS</div><button id="addTextChannelBtn" class="ghost sectionAddBtn hidden" title="Add text channel">＋</button></div>
         <div class="stack" id="channelList"></div>
-        <div id="voiceSpacer" style="height:.45rem"></div>
-        <div id="voiceHeader" class="sectionHead"><div class="small">VOICE CHANNELS</div><button id="addVoiceChannelBtn" class="ghost sectionAddBtn hidden" title="Add voice channel">＋</button></div>
-        <div class="stack" id="voiceList"></div>
       </div>
 
       <div id="dmSections" class="hidden">
@@ -272,7 +269,7 @@
   <div id="adminOverlay" class="overlay hidden">
     <div class="modal">
       <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Admin Settings</h3><button id="closeAdminBtn">Close</button></div>
-      <div class="small">Invite generation, recovery generation, anti-spam, bitrate, and account freeze.</div>
+      <div class="small">Invite generation, recovery generation, anti-spam, and account freeze.</div>
       <div class="stack">
         <div class="card">
           <h4>Admin Mode</h4>
@@ -290,11 +287,9 @@
           <div id="recoveryOut" class="linkbox small">(key will appear here)</div>
         </div>
         <div class="card">
-          <h4>Anti-Spam + Voice Bitrate</h4>
+          <h4>Anti-Spam</h4>
           <div class="row"><label>Level</label><select id="spamLevel"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
           <div class="small" id="spamEffective"></div>
-          <div class="row"><label>Bitrate</label><input id="voiceBitrate" type="number" min="16000" max="64000" value="32000"></div>
-          <div class="row"><label><input id="voiceEnabled" type="checkbox" checked> Enable voice channels</label></div>
           <button id="saveSettingsBtn">Save Settings</button>
         </div>
         <div class="card"><h4>Users (admin/freeze/delete)</h4><div id="userList" class="small"></div></div>
@@ -302,7 +297,7 @@
           <h4>Channel Editor</h4>
           <div class="row">
             <input id="newChannelName" placeholder="channel name">
-            <select id="newChannelKind"><option value="text">text</option><option value="voice">voice</option></select>
+            <select id="newChannelKind"><option value="text">text</option></select>
             <button id="addChannelBtn">Add</button>
           </div>
           <div id="channelAdminList" class="small"></div>
