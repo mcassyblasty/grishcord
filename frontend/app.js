@@ -10,12 +10,6 @@ const state = {
   mode: 'channel',
   activeChannelId: null,
   activeDmPeerId: null,
-  voice: {
-    room: null,
-    stream: null,
-    peers: new Map(),
-    muted: false
-  },
   adminMode: false,
   replyTo: null,
   allChannels: [],
@@ -25,7 +19,6 @@ const state = {
   notifications: [],
   unreadNotifications: 0,
   browserNotificationPermission: 'unsupported',
-  voiceIceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
   sounds: {
     messageReceived: null,
     genericNotify: null,
@@ -1014,7 +1007,6 @@ function connectWs(){
       refreshDms().catch(() => {});
       if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
     }
-    handleVoiceSignal(msg).catch((err) => console.warn('voice signal error', err));
   };
   state.ws.onclose = () => setTimeout(connectWs, 2000);
 }
@@ -1028,12 +1020,6 @@ async function loadVersion(){
   }
 }
 
-async function loadVoiceConfig() {
-  try {
-    const r = await api('/api/voice/config');
-    if (Array.isArray(r.iceServers) && r.iceServers.length) state.voiceIceServers = r.iceServers;
-  } catch {}
-}
 
 function applyTheme(theme){
   if(theme === 'discord') document.body.classList.add('discord');
@@ -1057,7 +1043,7 @@ function setComposerEnabled(enabled, placeholder = null) {
 
 
 function activeTextChannelMeta() {
-  return state.channels.find((c) => Number(c.id) === Number(state.activeChannelId) && c.kind !== 'voice') || null;
+  return state.channels.find((c) => Number(c.id) === Number(state.activeChannelId)) || null;
 }
 
 function applyComposerPolicyForCurrentContext() {
@@ -1204,7 +1190,7 @@ async function refreshAdmin(){
               if (active) text($('chatHeader'), `DM: ${active.display_name}`);
             } else {
               state.mode = 'channel';
-              const fallback = state.channels.find((c) => c.kind !== 'voice');
+              const fallback = state.channels[0] || null;
               if (fallback) {
                 state.activeChannelId = fallback.id;
                 text($('chatHeader'), `# ${fallback.name}`);
@@ -1248,196 +1234,17 @@ function switchSidebarView(view){
   $('dmViewBtn').classList.toggle('active', !server);
 }
 
-function showVoicePlaceholder(name){
-  state.mode = 'voice';
-  state.activeChannelId = null;
-  state.activeDmPeerId = null;
-  text($('chatHeader'), `Voice: ${name}`);
-  $('msgs').textContent = '';
-  const empty = document.createElement('div');
-  empty.className = 'empty';
-  empty.textContent = `Joining voice room ${name}… allow microphone access if prompted.`;
-  $('msgs').appendChild(empty);
-  setComposerEnabled(false, `You are in ${name} voice. Text sending is disabled here.`);
-}
-
-function ensureVoiceStatus() {
-  let box = $('voiceStatus');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'voiceStatus';
-    box.className = 'small';
-    $('chatHeader').insertAdjacentElement('afterend', box);
-  }
-  return box;
-}
-
-function updateVoiceStatus(extra = '') {
-  const connected = state.voice.room ? `Connected: ${state.voice.room}` : 'Not connected to voice';
-  const peers = `Peers: ${state.voice.peers.size}`;
-  text(ensureVoiceStatus(), [connected, peers, extra].filter(Boolean).join(' · '));
-}
-
-async function leaveVoiceRoom() {
-  if (state.voice.room) {
-    try { state.ws?.send(JSON.stringify({ type: 'voice_leave' })); } catch {}
-  }
-  for (const peer of state.voice.peers.values()) {
-    try { peer.pc.close(); } catch {}
-  }
-  state.voice.peers.clear();
-  if (state.voice.stream) {
-    for (const t of state.voice.stream.getTracks()) t.stop();
-    state.voice.stream = null;
-  }
-  state.voice.room = null;
-  state.voice.muted = false;
-  setComposerEnabled(true);
-  updateVoiceStatus('Left room');
-  renderNavLists();
-  if (state.mode === 'voice') {
-    const fallback = state.channels.find((c) => c.kind !== 'voice');
-    if (fallback) {
-      state.mode = 'channel';
-      state.activeChannelId = fallback.id;
-      text($('chatHeader'), `# ${fallback.name}`);
-      await loadMessages();
-    }
-  }
-}
-
-function peerConnectionFor(targetUserId) {
-  if (state.voice.peers.has(targetUserId)) return state.voice.peers.get(targetUserId);
-  const pc = new RTCPeerConnection({
-    iceServers: Array.isArray(state.voiceIceServers) && state.voiceIceServers.length ? state.voiceIceServers : [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
-  });
-  const audio = new Audio();
-  audio.autoplay = true;
-  audio.playsInline = true;
-  const remote = new MediaStream();
-  audio.srcObject = remote;
-
-  pc.ontrack = (ev) => { for (const t of ev.streams[0].getTracks()) remote.addTrack(t); };
-  pc.onicecandidate = (ev) => {
-    if (!ev.candidate) return;
-    state.ws?.send(JSON.stringify({ type: 'voice_ice', targetUserId, candidate: ev.candidate }));
-  };
-
-  const peer = { pc, audio };
-  state.voice.peers.set(targetUserId, peer);
-  for (const t of state.voice.stream?.getTracks?.() || []) pc.addTrack(t, state.voice.stream);
-  updateVoiceStatus();
-  return peer;
-}
-
-async function joinVoiceRoom(room) {
-  const rejoiningSameRoom = state.voice.room === room;
-  if (rejoiningSameRoom) {
-    await leaveVoiceRoom();
-    return;
-  }
-  await leaveVoiceRoom();
-  showVoicePlaceholder(room);
-  try {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('Microphone access is unavailable on this browser/origin. Use HTTPS (or localhost) and allow mic permissions.');
-    }
-    state.voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    if (!state.voice.stream.getAudioTracks().length) {
-      throw new Error('No microphone track was provided by the browser.');
-    }
-    state.voice.room = room;
-    state.ws?.send(JSON.stringify({ type: 'voice_join', room }));
-    const btnRow = document.createElement('div');
-    btnRow.className = 'row';
-    const mute = document.createElement('button');
-    mute.textContent = 'Mute';
-    mute.onclick = () => {
-      state.voice.muted = !state.voice.muted;
-      for (const t of state.voice.stream.getAudioTracks()) t.enabled = !state.voice.muted;
-      mute.textContent = state.voice.muted ? 'Unmute' : 'Mute';
-      updateVoiceStatus(state.voice.muted ? 'Muted' : 'Unmuted');
-    };
-    const leave = document.createElement('button');
-    leave.textContent = 'Leave Voice';
-    leave.onclick = () => leaveVoiceRoom();
-    btnRow.append(mute, leave);
-    $('msgs').appendChild(btnRow);
-    updateVoiceStatus('Connected (microphone active)');
-    renderNavLists();
-  } catch (err) {
-    if (state.voice.stream) {
-      for (const t of state.voice.stream.getTracks()) t.stop();
-      state.voice.stream = null;
-    }
-    state.voice.room = null;
-    renderNavLists();
-    updateVoiceStatus('Mic permission denied or unavailable');
-    showError(`Voice join failed: ${err.message || err}`);
-  }
-}
-
-async function handleVoiceSignal(msg) {
-  if (!msg || !msg.type) return;
-  if (!['voice_peer_joined', 'voice_offer', 'voice_answer', 'voice_ice', 'voice_peer_left'].includes(msg.type)) return;
-  const data = msg.data || {};
-  if (!state.voice.room) return;
-
-  if (msg.type === 'voice_peer_left') {
-    const peer = state.voice.peers.get(Number(data.userId));
-    if (peer) {
-      try { peer.pc.close(); } catch {}
-      state.voice.peers.delete(Number(data.userId));
-      updateVoiceStatus();
-    }
-    return;
-  }
-
-  if (msg.type === 'voice_peer_joined') {
-    const targetUserId = Number(data.userId);
-    if (!targetUserId || targetUserId === state.me?.id) return;
-    if (Number(state.me?.id) < targetUserId) {
-      const peer = peerConnectionFor(targetUserId);
-      const offer = await peer.pc.createOffer();
-      await peer.pc.setLocalDescription(offer);
-      state.ws?.send(JSON.stringify({ type: 'voice_offer', targetUserId, sdp: offer }));
-    }
-    return;
-  }
-
-  const fromUserId = Number(data.fromUserId);
-  if (!fromUserId) return;
-  const peer = peerConnectionFor(fromUserId);
-
-  if (msg.type === 'voice_offer' && data.sdp) {
-    await peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-    const answer = await peer.pc.createAnswer();
-    await peer.pc.setLocalDescription(answer);
-    state.ws?.send(JSON.stringify({ type: 'voice_answer', targetUserId: fromUserId, sdp: answer }));
-    return;
-  }
-
-  if (msg.type === 'voice_answer' && data.sdp) {
-    await peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-    return;
-  }
-
-  if (msg.type === 'voice_ice' && data.candidate) {
-    try { await peer.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
-  }
-}
-
 function canInlineChannelAdmin() {
   return Boolean(state.adminMode && (state.me?.username === 'mcassyblasty' || state.me?.is_admin));
 }
 
-async function createChannelFromSidebar(kind) {
+async function createChannelFromSidebar() {
   if (!canInlineChannelAdmin()) return;
-  const raw = await askPrompt(`New ${kind} channel name:`, '', `Create ${kind} channel`);
+  const raw = await askPrompt('New text channel name:', '', 'Create text channel');
   const name = String(raw || '').trim();
   if (!name) return;
   try {
-    await api('/api/admin/channels', 'POST', { name, kind });
+    await api('/api/admin/channels', 'POST', { name, kind: 'text' });
     await refreshChannels();
   } catch (err) {
     showError(`Channel add failed: ${humanError(err)}`);
@@ -1506,10 +1313,9 @@ function renderNavLists(){
   const showAllChannelsInAdmin = canAdmin;
   const navChannels = showAllChannelsInAdmin && state.allChannels.length ? state.allChannels : state.channels;
   $('addTextChannelBtn')?.classList.toggle('hidden', !canAdmin);
-  $('addVoiceChannelBtn')?.classList.toggle('hidden', !canAdmin);
 
   const cl = $('channelList'); cl.textContent='';
-  const textChannels = navChannels.filter((x) => x.kind !== 'voice');
+  const textChannels = navChannels;
   for (const c of textChannels){
     const row = document.createElement('div');
     row.className = 'chanRow';
@@ -1596,91 +1402,6 @@ function renderNavLists(){
     cl.appendChild(row);
   }
 
-  const vl = $('voiceList');
-  const voiceChannels = navChannels.filter((x) => x.kind === 'voice');
-  if (vl) vl.textContent='';
-  $('voiceHeader')?.classList.toggle('hidden', voiceChannels.length === 0);
-  $('voiceSpacer')?.classList.toggle('hidden', voiceChannels.length === 0);
-  for (const c of voiceChannels) {
-    if (!vl) break;
-    const row = document.createElement('div');
-    row.className = 'chanRow';
-    row.dataset.channelId = String(c.id);
-    row.draggable = false;
-
-    const b = document.createElement('button');
-    const activeVoice = state.voice.room === c.name;
-    b.className = `channel ${activeVoice ? 'active' : ''}`;
-    b.textContent = `${activeVoice ? '🔊 Leave' : '🔈 Join'} ${c.name}${c.archived ? ' (off)' : ''}`;
-    if (c.archived) b.style.opacity = '0.72';
-    b.title = activeVoice ? `Leave ${c.name}` : `Join ${c.name}`;
-    b.onclick = ()=> {
-      if (c.archived && canAdmin) return;
-      joinVoiceRoom(c.name);
-    };
-    row.appendChild(b);
-
-    if (canAdmin) {
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'ghost chanToggleBtn';
-      toggleBtn.textContent = c.archived ? 'Off' : 'On';
-      toggleBtn.title = 'Toggle channel visibility';
-      toggleBtn.onclick = async (e) => {
-        e.stopPropagation();
-        try {
-          await api(`/api/admin/channels/${c.id}`, 'PATCH', { archived: !c.archived });
-          await refreshAdmin();
-          await refreshChannels();
-          renderNavLists();
-        } catch (err) {
-          showError(`Channel toggle failed: ${humanError(err)}`);
-        }
-      };
-      row.appendChild(toggleBtn);
-
-      const dragBtn = document.createElement('button');
-      dragBtn.className = 'ghost chanDragHandle';
-      dragBtn.textContent = '↕';
-      dragBtn.title = 'Drag to reorder';
-      dragBtn.draggable = true;
-      dragBtn.addEventListener('dragstart', (e) => {
-        row.classList.add('dragging');
-        e.dataTransfer.setData('text/plain', String(c.id));
-      });
-      dragBtn.addEventListener('dragend', () => row.classList.remove('dragging'));
-      row.appendChild(dragBtn);
-
-      const menuBtn = document.createElement('button');
-      menuBtn.className = 'ghost chanMenuBtn';
-      menuBtn.textContent = '⋯';
-      menuBtn.title = 'Channel actions';
-      menuBtn.onclick = async (e) => {
-        e.stopPropagation();
-        try {
-          renderChannelActionMenu(menuBtn, c, async () => { await refreshChannels(); renderNavLists(); });
-        } catch (err) {
-          showError(`Channel action failed: ${humanError(err)}`);
-        }
-      };
-      row.appendChild(menuBtn);
-
-      row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('dropTarget'); });
-      row.addEventListener('dragleave', () => row.classList.remove('dropTarget'));
-      row.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        row.classList.remove('dropTarget');
-        const draggedId = Number(e.dataTransfer.getData('text/plain') || 0);
-        if (!draggedId || draggedId === c.id) return;
-        const draggedRow = vl.querySelector(`.chanRow[data-channel-id="${draggedId}"]`);
-        if (!draggedRow) return;
-        vl.insertBefore(draggedRow, row);
-        try { await persistChannelOrder('voice', vl); } catch (err) { showError(`Reorder failed: ${humanError(err)}`); }
-      });
-    }
-
-    vl.appendChild(row);
-  }
-
   const dl = $('dmList'); dl.textContent='';
   const dmSearch = normalizeMentionKey(state.dmSearchQuery);
   const dmUsers = state.users.filter((u) => {
@@ -1740,7 +1461,7 @@ async function afterAuth(){
 
   state.mode = 'channel';
   state.sidebarView = 'server';
-  state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
+  state.activeChannelId = state.channels[0]?.id || null;
   state.activeDmPeerId = null;
   const initialChannel = state.channels.find((c) => c.id === state.activeChannelId) || {};
   text($('chatHeader'), `# ${initialChannel.name || 'general'}${initialChannel.announcement_only ? ' 📢' : ''}`);
@@ -1752,7 +1473,6 @@ async function afterAuth(){
   await loadMessages();
   focusComposer();
   connectWs();
-  await loadVoiceConfig();
   await refreshAdmin();
 }
 
@@ -1768,8 +1488,8 @@ async function refreshDms(){
 async function refreshChannels(){
   const prev = state.activeChannelId;
   state.channels = await api('/api/channels');
-  if (!state.channels.some((c)=>c.id===prev && c.kind !== 'voice')) {
-    state.activeChannelId = state.channels.find((c)=>c.kind !== 'voice')?.id || null;
+  if (!state.channels.some((c)=>c.id===prev)) {
+    state.activeChannelId = state.channels[0]?.id || null;
   }
   applyComposerPolicyForCurrentContext();
   renderNavLists();
@@ -1971,7 +1691,6 @@ async function boot(){
 
   $('logoutBtn').onclick = async()=>{
     try { await api('/api/logout','POST',{}); } catch {}
-    await leaveVoiceRoom();
     state.me = null;
     setReplyTarget(null);
     state.adminMode = false;
@@ -1987,9 +1706,9 @@ async function boot(){
   $('serverViewBtn').onclick = async()=>{
     switchSidebarView('server');
     setReplyTarget(null);
-    if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels.find((c) => c.kind !== 'voice')?.id || null;
+    if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels[0]?.id || null;
     state.mode = 'channel';
-    const active = state.channels.find((c) => c.id === state.activeChannelId && c.kind !== 'voice') || state.channels.find((c) => c.kind !== 'voice');
+    const active = state.channels.find((c) => c.id === state.activeChannelId) || state.channels[0];
     if (active) {
       state.activeChannelId = active.id;
       text($('chatHeader'), `# ${active.name}${active.announcement_only ? ' 📢' : ''}`);
@@ -2032,7 +1751,7 @@ async function boot(){
     loadMessages().catch(()=>{});
   };
 
-  $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar('text');
+  $('addTextChannelBtn').onclick = ()=> createChannelFromSidebar();
 
   const setAuthAuxMode = (mode = 'none') => {
     const registerOpen = mode === 'register';
@@ -2223,7 +1942,7 @@ async function boot(){
     try {
       const name = $('newChannelName').value.trim();
       const kind = $('newChannelKind').value;
-      await api('/api/admin/channels', 'POST', { name, kind });
+      await api('/api/admin/channels', 'POST', { name, kind: 'text' });
       $('newChannelName').value = '';
       await refreshChannels();
       renderChannelAdmin();
