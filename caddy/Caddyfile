@@ -1,9 +1,10 @@
 :80 {
   encode zstd gzip
   header {
-    Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     X-Content-Type-Options nosniff
     Referrer-Policy no-referrer
+    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=(), browsing-topics=()"
   }
 
   @public_host host {$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com}
@@ -17,9 +18,11 @@
 https://{$CADDY_SITE_ADDRESS:grishcord.countgrishnackh.com} {
   encode zstd gzip
   header {
-    Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     X-Content-Type-Options nosniff
     Referrer-Policy no-referrer
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=(), browsing-topics=()"
   }
 
   @api path /api/* /ws*

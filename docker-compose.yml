@@ -75,7 +75,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       BOT_OLLAMA_TIMEOUT_MS: ${BOT_OLLAMA_TIMEOUT_MS:-30000}
       BOT_MAX_REPLY_CHARS: ${BOT_MAX_REPLY_CHARS:-1800}
-      BOT_CONTEXT_MAX_MESSAGES: ${BOT_CONTEXT_MAX_MESSAGES:-30}
+      BOT_CONTEXT_MAX_MESSAGES: ${BOT_CONTEXT_MAX_MESSAGES:-10}
       BOT_CONVO_TTL_MS: ${BOT_CONVO_TTL_MS:-900000}
       BOT_RATE_LIMIT_MS: ${BOT_RATE_LIMIT_MS:-2000}
       BOT_MAX_CONCURRENCY_PER_CHANNEL: ${BOT_MAX_CONCURRENCY_PER_CHANNEL:-1}
@@ -83,7 +83,9 @@ services:
       BOT_CONFIG_FILE: /config/.aibot.env
       OLLAMA_CONFIG_FILE: /config/.ollama.env
     volumes:
-      - ./:/config:ro
+      - ./bot/prompts:/config/bot/prompts:ro
+      - ./.aibot.env:/config/.aibot.env:ro
+      - ./.ollama.env:/config/.ollama.env:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -3,30 +3,40 @@
 Minimal private Discord-like web app scaffold with Docker Compose and Postgres.
 
 ## Install helper
-- `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
+- `./install_grishcord.sh` (interactive installer usable from anywhere)
 - If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
 - Installer records update metadata in `.grishcord-install.env` so `grishcordctl.sh update-start` can update source code before rebuilding.
-- `./install_grishcord.sh` (full local deployment bootstrap: root admin + optional AI + optional UFW adjustments)
+- Defaults when repo root is not detected: source `curl`, repo `https://github.com/mcassyblasty/grishcord`, target `./grishcord` under current working directory.
+- Full local bootstrap includes guided `.env` setup, admin bootstrap/login, and optional AI (Ollama + GrishBot) flow.
 
 ### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
-- If repo root is not detected, where Grishcord should be located and whether to use git/wget/curl/local-archive source
-- Root admin username
-- Root admin display name
-- Root admin password (hidden input)
+- If repo root is not detected: install target and repo source (git/wget/curl/local-archive)
+- Public hostname (used for `CADDY_SITE_ADDRESS`, `PUBLIC_BASE_URL`, `CORS_ORIGINS`)
+- Admin username
+- Admin display name
+- Admin password (hidden input)
+- Postgres password (or blank to keep/generate securely)
 - Whether the existing DB already has an admin account (for reinstalling against existing DB data)
 - Optional AI enablement (Ollama + bot account)
 - If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
 
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
+When needed, installer auto-generates secure `JWT_SECRET` and `POSTGRES_PASSWORD` values during the wizard.
+Local runtime config files (`.env`, `.install.env`, `.aibot.env`, `.ollama.env`) are intentionally gitignored and should stay private.
 
 Re-run safely at any time:
 - `./install_grishcord.sh`
 
+## First-run config
+- Recommended: run `./install_grishcord.sh` and follow the guided `.env` wizard (hostname, admin credentials, DB password, secure secret generation).
+- Manual fallback: copy `.env.example` to `.env` and set real values before startup.
+- Treat `.env` as local-only runtime config: do not commit or ship it in release artifacts.
+
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
-- `./scripts/grishcordctl.sh restart` (fast service restart + readiness waits)
+- `./scripts/grishcordctl.sh restart` (recreate backend/frontend/bot/caddy so `.env` changes apply, then wait for readiness)
 - `./scripts/grishcordctl.sh stop` (verbose stop)
 - `./scripts/grishcordctl.sh update-start` (pull, rebuild, start with live timers)
 - `./scripts/grishcordctl.sh status` (compose status + LAN URL)
@@ -44,6 +54,7 @@ Re-run safely at any time:
 - Canonical app version: `VERSION`
 - Release history: `docs/CHANGELOG.md`
 - Runtime source of truth in containers: backend reads `/app/VERSION` by default.
+- Backend container dependencies are lockfile-pinned (`backend/package-lock.json`) and installed via `npm ci --omit=dev` for reproducible builds.
 - Optional override: set `APP_VERSION` only if you intentionally want to override `VERSION`.
 
 
@@ -51,10 +62,18 @@ Re-run safely at any time:
 - Place notification WAV files in `frontend/audio/` (served by the frontend container at `/audio/...`).
 - Current frontend alert lookup includes message and notification variants such as `message_received.wav` and `notification.wav`.
 
-## Security-related environment notes
-- `PUBLIC_BASE_URL` should match your externally reachable app URL.
-- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
+## Security-sensitive config
+- `JWT_SECRET` is required and backend startup now fails if it is missing, too short (<32 chars), or placeholder-like (for example `change-me` or `replace_with_long_random_secret`).
+- `grishcordctl` preflights `JWT_SECRET` before start/restart/update-start and aborts early with a clear message if it is invalid.
+- `PUBLIC_BASE_URL` and/or `CORS_ORIGINS` must resolve to valid trusted origins (for example `https://chat.example.com`).
+- In production/container-style deployments, backend startup fails closed when trusted origin config is empty or invalid.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
+- Session cookies remain `httpOnly` + `sameSite=lax`; `secure` is enabled when `COOKIE_SECURE=true` and TLS is active at the edge (`X-Forwarded-Proto=https`).
+- WebSocket connections require a valid session cookie; channel events are scoped to explicit `subscribe` messages (`{"type":"subscribe","channelIds":[...]}`).
+- Message history APIs require explicit scope (`channelId` or `dmPeerId`), and `/api/messages/window/:id` returns only a bounded window up to the trigger message.
+- Upload downloads are access-checked against attached messages; orphaned uploads are denied by default.
+- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
+- Frontend ships with a system font stack (no Google Fonts request), and edge CSP/header policy is set in `caddy/Caddyfile`.
 - Authentication and recovery endpoints are rate-limited server-side; repeated failures receive HTTP `429` with `Retry-After`.
 
 ## Compose database host note
@@ -122,7 +141,6 @@ This writes `.aibot.env` (editable later) with:
 - `BOT_DISPLAY_NAME`
 - `BOT_COLOR`
 - `OLLAMA_MODEL`
-- `BOT_CONVO_TTL_MS`
 
 `BOT_PASSWORD` is intentionally not written there by default.
 
@@ -137,7 +155,8 @@ Set `BOT_PASSWORD` in your runtime compose environment (for example `.env` on th
 ### Edit system prompt
 Edit `bot/prompts/system.txt`.
 - The bot reads this file at runtime when generating replies.
-- No rebuild is required by default because compose points the bot to `/config/bot/prompts/system.txt` (repo-mounted read-only into the container). Restart the bot service after edits if needed.
+- No rebuild is required by default because compose mounts only `bot/prompts/` to `/config/bot/prompts/` for the bot container. Restart the bot service after edits if needed.
+- Bot container mounts are intentionally minimal (`bot/prompts/`, `.aibot.env`, `.ollama.env`) and do not include the full repo tree.
 
 ### Bot env vars
 Required:
@@ -150,11 +169,14 @@ Required:
 Optional:
 - `BOT_OLLAMA_TIMEOUT_MS` (default `30000`)
 - `BOT_MAX_REPLY_CHARS` (default `1800`)
-- `BOT_CONTEXT_MAX_MESSAGES` (default `30`)
-- `BOT_CONVO_TTL_MS` (default `900000`)
+- `BOT_CONTEXT_MAX_MESSAGES` (default `10`)
 - `BOT_RATE_LIMIT_MS` (default `2000`)
 - `BOT_MAX_CONCURRENCY_PER_CHANNEL` (default `1`)
 - `BOT_PROMPT_FILE` (default `/config/bot/prompts/system.txt`)
+- `BOT_ENABLE_DMS` (default `true`)
+- `BOT_ENABLE_CHANNELS` (default `true`)
+- `BOT_ALLOWED_CHANNEL_IDS` (optional comma-separated channel id allowlist)
+- `BOT_REPLY_ON_ERROR` (default `false`; send a short fallback reply on timeout/error/empty output)
 
 ### Manual verification checklist (acceptance)
 1. Start Grishcord + bot (`./scripts/grishcordctl.sh start`) and confirm bot logs show successful login and WebSocket connection.
@@ -162,7 +184,7 @@ Optional:
 3. Ping `@<bot_username>` in a server channel: bot should respond as a **reply** to that message.
 4. Reply to the bot’s message in a server channel: bot should respond.
 5. Send a DM to the bot account: bot should respond in that DM.
-6. Wait longer than `BOT_CONVO_TTL_MS` (default 15 minutes), then ping again: bot should treat it as a fresh context and avoid referencing expired conversation memory.
+6. Confirm no fallback reply is sent when `BOT_REPLY_ON_ERROR=false` by forcing a model timeout/error.
 
 ## Root admin protection
 - The installer sets `ADMIN_USERNAME` in `.env` to the chosen root admin username.
