@@ -3,31 +3,35 @@
 Minimal private Discord-like web app scaffold with Docker Compose and Postgres.
 
 ## Install helper
-- `./install_grishcord.sh` (interactive installer usable from anywhere: choose git/wget/curl and target directory)
+- `./install_grishcord.sh` (interactive installer usable from anywhere)
 - If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
 - Installer records update metadata in `.grishcord-install.env` so `grishcordctl.sh update-start` can update source code before rebuilding.
-- `./install_grishcord.sh` (full local deployment bootstrap: root admin + optional AI + optional UFW adjustments)
+- Defaults when repo root is not detected: source `curl`, repo `https://github.com/mcassyblasty/grishcord`, target `./grishcord` under current working directory.
+- Full local bootstrap includes guided `.env` setup, admin bootstrap/login, and optional AI (Ollama + GrishBot) flow.
 
 ### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
-- If repo root is not detected, where Grishcord should be located and whether to use git/wget/curl/local-archive source
-- Root admin username
-- Root admin display name
-- Root admin password (hidden input)
+- If repo root is not detected: install target and repo source (git/wget/curl/local-archive)
+- Public hostname (used for `CADDY_SITE_ADDRESS`, `PUBLIC_BASE_URL`, `CORS_ORIGINS`)
+- Admin username
+- Admin display name
+- Admin password (hidden input)
+- Postgres password (or blank to keep/generate securely)
 - Whether the existing DB already has an admin account (for reinstalling against existing DB data)
 - Optional AI enablement (Ollama + bot account)
 - If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
 
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
+When needed, installer auto-generates secure `JWT_SECRET` and `POSTGRES_PASSWORD` values during the wizard.
 Local runtime config files (`.env`, `.install.env`, `.aibot.env`, `.ollama.env`) are intentionally gitignored and should stay private.
 
 Re-run safely at any time:
 - `./install_grishcord.sh`
 
 ## First-run config
-- Copy `.env.example` to `.env`.
-- Set a real random `JWT_SECRET` (at least 32 chars; not placeholder-like values).
+- Recommended: run `./install_grishcord.sh` and follow the guided `.env` wizard (hostname, admin credentials, DB password, secure secret generation).
+- Manual fallback: copy `.env.example` to `.env` and set real values before startup.
 - Treat `.env` as local-only runtime config: do not commit or ship it in release artifacts.
 
 ## Operations
