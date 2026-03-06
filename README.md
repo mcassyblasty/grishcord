@@ -137,7 +137,6 @@ This writes `.aibot.env` (editable later) with:
 - `BOT_DISPLAY_NAME`
 - `BOT_COLOR`
 - `OLLAMA_MODEL`
-- `BOT_CONVO_TTL_MS`
 
 `BOT_PASSWORD` is intentionally not written there by default.
 
@@ -167,7 +166,6 @@ Optional:
 - `BOT_OLLAMA_TIMEOUT_MS` (default `30000`)
 - `BOT_MAX_REPLY_CHARS` (default `1800`)
 - `BOT_CONTEXT_MAX_MESSAGES` (default `10`)
-- `BOT_CONVO_TTL_MS` (default `900000`)
 - `BOT_RATE_LIMIT_MS` (default `2000`)
 - `BOT_MAX_CONCURRENCY_PER_CHANNEL` (default `1`)
 - `BOT_PROMPT_FILE` (default `/config/bot/prompts/system.txt`)
@@ -182,7 +180,7 @@ Optional:
 3. Ping `@<bot_username>` in a server channel: bot should respond as a **reply** to that message.
 4. Reply to the bot’s message in a server channel: bot should respond.
 5. Send a DM to the bot account: bot should respond in that DM.
-6. Wait longer than `BOT_CONVO_TTL_MS` (default 15 minutes), then ping again: bot should treat it as a fresh context and avoid referencing expired conversation memory.
+6. Confirm no fallback reply is sent when `BOT_REPLY_ON_ERROR=false` by forcing a model timeout/error.
 
 ## Root admin protection
 - The installer sets `ADMIN_USERNAME` in `.env` to the chosen root admin username.

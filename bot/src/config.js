@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 const DEFAULTS = {
   GRISHCORD_BASE_URL: 'http://backend:3000',
@@ -10,7 +9,6 @@ const DEFAULTS = {
   BOT_ENABLE_CHANNELS: 'true',
   BOT_ALLOWED_CHANNEL_IDS: '',
   BOT_REPLY_ON_ERROR: 'false',
-  BOT_CONVO_TTL_MS: '900000',
   BOT_RATE_LIMIT_MS: '2000',
   BOT_MAX_CONCURRENCY_PER_CHANNEL: '1',
   BOT_PROMPT_FILE: '/config/bot/prompts/system.txt'
@@ -36,7 +34,6 @@ function toInt(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
-
 
 function toBool(v, fallback) {
   const s = String(v ?? '').trim().toLowerCase();
@@ -81,7 +78,6 @@ export function loadConfig() {
     enableChannels: toBool(get('BOT_ENABLE_CHANNELS'), true),
     allowedChannelIds: toIdList(get('BOT_ALLOWED_CHANNEL_IDS')),
     replyOnError: toBool(get('BOT_REPLY_ON_ERROR'), false),
-    convoTtlMs: toInt(get('BOT_CONVO_TTL_MS'), 900000),
     rateLimitMs: toInt(get('BOT_RATE_LIMIT_MS'), 2000),
     maxConcurrencyPerChannel: Math.max(1, toInt(get('BOT_MAX_CONCURRENCY_PER_CHANNEL'), 1)),
     promptFile: get('BOT_PROMPT_FILE') || '/config/bot/prompts/system.txt'
@@ -96,6 +92,3 @@ export function loadConfig() {
   return cfg;
 }
 
-export function resolvePath(...parts) {
-  return path.resolve(...parts);
-}

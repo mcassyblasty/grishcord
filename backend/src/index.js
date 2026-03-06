@@ -895,15 +895,31 @@ function parseMessageLimit(rawValue, defaultLimit, maxLimit) {
   return Math.max(1, Math.min(maxLimit, Math.floor(parsed)));
 }
 
+function resolveMessageScopeOrError(req, res) {
+  const scope = parseMessageScopeFromQuery(req);
+  if (!scope) {
+    res.status(400).json({ error: 'scope_required' });
+    return null;
+  }
+  const { channelId, dmPeerId, hasChannel } = scope;
+  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  return scope;
+}
+
 app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
   const since = Number(req.params.id);
-  const scope = parseMessageScopeFromQuery(req);
+  const scope = resolveMessageScopeOrError(req, res);
   if (!Number.isFinite(since) || since < 0) return res.status(400).json({ error: 'invalid_id' });
-  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  if (!scope) return;
   const { channelId, dmPeerId, hasChannel } = scope;
-  const limit = parseMessageLimit(undefined, 500, 500);
-  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
-  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
+  const limit = parseMessageLimit(null, 500, 500);
 
   let rows;
   if (hasChannel) {
@@ -951,11 +967,9 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
 });
 
 app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) => {
-  const scope = parseMessageScopeFromQuery(req);
-  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  const scope = resolveMessageScopeOrError(req, res);
+  if (!scope) return;
   const { channelId, dmPeerId, hasChannel } = scope;
-  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
-  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
 
   const limit = parseMessageLimit(req.query.limit, 100, 200);
   let rows;
@@ -1009,20 +1023,16 @@ app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) =>
   for (const r of rows) {
     r.uploads = byId.get(Number(r.id)) || [];
   }
-
-  const hasTrigger = rows.some((r) => Number(r.id) === triggerId);
-  if (!hasTrigger) return res.status(404).json({ error: 'not_found' });
+  // Recent route is scope-based only; it does not require/validate any trigger message.
   res.json(rows);
 });
 
 app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res) => {
   const triggerId = Number(req.params.id);
-  const scope = parseMessageScopeFromQuery(req);
+  const scope = resolveMessageScopeOrError(req, res);
   if (!Number.isFinite(triggerId) || triggerId <= 0) return res.status(400).json({ error: 'invalid_id' });
-  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  if (!scope) return;
   const { channelId, dmPeerId, hasChannel } = scope;
-  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
-  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
 
   const limit = parseMessageLimit(req.query.limit, 10, 100);
   let rows;
