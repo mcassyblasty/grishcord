@@ -4,6 +4,7 @@ const state = {
   lastId: 0,
   redeemId: null,
   ws: null,
+  wsSubscribedChannelKey: '',
   channels: [],
   users: [],
   sidebarView: 'server',
@@ -912,6 +913,7 @@ async function openNotification(n) {
     const active = state.channels.find((c) => Number(c.id) === Number(target.channelId));
     text($('chatHeader'), `# ${active?.name || 'channel'}`);
   }
+  syncWsChannelSubscription();
   renderNavLists();
   await loadMessages();
   closeSidebarOnMobile();
@@ -943,10 +945,12 @@ async function uploadAttachmentFile(file) {
 }
 
 async function loadMessages(){
-  let q = '';
-  if (state.mode === 'channel' && state.activeChannelId) q = `?channelId=${state.activeChannelId}`;
-  if (state.mode === 'dm' && state.activeDmPeerId) q = `?dmPeerId=${state.activeDmPeerId}`;
-  const rows = await api(`/api/messages/since/0${q}`);
+  syncWsChannelSubscription();
+  const params = new URLSearchParams();
+  params.set('limit', '100');
+  if (state.mode === 'channel' && state.activeChannelId) params.set('channelId', String(state.activeChannelId));
+  if (state.mode === 'dm' && state.activeDmPeerId) params.set('dmPeerId', String(state.activeDmPeerId));
+  const rows = await api(`/api/messages/recent?${params.toString()}`);
   $('msgs').textContent = '';
   if (!rows.length) {
     const empty = document.createElement('div');
@@ -967,6 +971,8 @@ function connectWs(){
   if(state.ws) state.ws.close();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.wsSubscribedChannelKey = '';
+  state.ws.onopen = () => syncWsChannelSubscription();
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === 'notification' && msg.data) {
@@ -1008,7 +1014,24 @@ function connectWs(){
       if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
     }
   };
-  state.ws.onclose = () => setTimeout(connectWs, 2000);
+  state.ws.onclose = () => {
+    state.wsSubscribedChannelKey = '';
+    setTimeout(connectWs, 2000);
+  };
+}
+
+function syncWsChannelSubscription() {
+  try {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const channelIds = (state.mode === 'channel' && Number.isFinite(Number(state.activeChannelId)) && Number(state.activeChannelId) > 0)
+      ? [String(Number(state.activeChannelId))]
+      : [];
+    const key = channelIds.join(',');
+    if (state.wsSubscribedChannelKey === key) return;
+    ws.send(JSON.stringify({ type: 'subscribe', channelIds }));
+    state.wsSubscribedChannelKey = key;
+  } catch {}
 }
 
 async function loadVersion(){
@@ -1332,6 +1355,7 @@ function renderNavLists(){
       switchSidebarView('server');
       state.activeChannelId = c.id;
       state.activeDmPeerId = null;
+      syncWsChannelSubscription();
       text($('chatHeader'), `# ${c.name}${c.announcement_only ? ' 📢' : ''}`);
       applyComposerPolicyForCurrentContext();
       renderNavLists();
@@ -1420,6 +1444,7 @@ function renderNavLists(){
       switchSidebarView('dms');
       state.activeDmPeerId = u.id;
       state.activeChannelId = null;
+      syncWsChannelSubscription();
       text($('chatHeader'), `DM: ${u.display_name}`);
       setComposerEnabled(true);
       renderNavLists();
@@ -1433,6 +1458,7 @@ function renderNavLists(){
 
 
 function showDmLanding() {
+  syncWsChannelSubscription();
   text($('chatHeader'), 'Direct Messages');
   $('msgs').textContent = '';
   const empty = document.createElement('div');
@@ -1493,6 +1519,7 @@ async function refreshChannels(){
   }
   applyComposerPolicyForCurrentContext();
   renderNavLists();
+  syncWsChannelSubscription();
   if (state.me?.username === 'mcassyblasty' || state.me?.is_admin) refreshAdmin().catch(() => {});
 }
 
@@ -1708,6 +1735,7 @@ async function boot(){
     setReplyTarget(null);
     if (!state.activeChannelId && state.channels.length) state.activeChannelId = state.channels[0]?.id || null;
     state.mode = 'channel';
+    syncWsChannelSubscription();
     const active = state.channels.find((c) => c.id === state.activeChannelId) || state.channels[0];
     if (active) {
       state.activeChannelId = active.id;
@@ -1724,6 +1752,7 @@ async function boot(){
     switchSidebarView('dms');
     setReplyTarget(null);
     state.mode = 'dm';
+    syncWsChannelSubscription();
     renderNavLists();
     const active = state.users.find((u) => u.id === state.activeDmPeerId);
     if (active) {

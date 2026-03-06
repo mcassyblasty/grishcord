@@ -7,6 +7,31 @@ INSTALL_ENV_FILE=""
 COOKIE_JAR="$(mktemp /tmp/grishcord-install-cookie.XXXXXX)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
 
+sanitize_env_value() {
+  local v="$1"
+  v="${v//$'\r'/ }"
+  v="${v//$'\n'/ }"
+  printf '%s' "$v" | tr -d '\000-\010\013\014\016-\037\177'
+}
+
+load_data_env_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in
+      ROOT_ADMIN_USERNAME|ROOT_ADMIN_DISPLAY_NAME|EXISTING_ADMIN_DB|ENABLE_AI|BOT_USERNAME|BOT_DISPLAY_NAME|BOT_COLOR)
+        printf -v "$key" '%s' "$(sanitize_env_value "$value")"
+        ;;
+    esac
+  done < "$file"
+}
+
 log(){ printf '[installGrishcord] %s\n' "$*"; }
 warn(){ printf '[installGrishcord][warn] %s\n' "$*" >&2; }
 err(){ printf '[installGrishcord][error] %s\n' "$*" >&2; }
@@ -123,7 +148,7 @@ resolve_app_dir() {
   provision_repo_checkout
 }
 
-load_install_env(){ [[ -f "$INSTALL_ENV_FILE" ]] && source "$INSTALL_ENV_FILE" || true; }
+load_install_env(){ load_data_env_file "$INSTALL_ENV_FILE"; }
 
 ensure_env_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -139,11 +164,16 @@ get_env_key() {
 
 set_env_key() {
   local key="$1"; local value="$2"
-  if grep -qE "^${key}=" "$ENV_FILE"; then
-    sed -i "s#^${key}=.*#${key}=${value//#/\\#}#" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  fi
+  local safe_value tmp_file
+  safe_value="$(sanitize_env_value "$value")"
+  tmp_file="$(mktemp /tmp/grishcord-env.XXXXXX)"
+  awk -F= -v k="$key" -v v="$safe_value" '
+    BEGIN { replaced = 0 }
+    $1 == k { print k "=" v; replaced = 1; next }
+    { print }
+    END { if (!replaced) print k "=" v }
+  ' "$ENV_FILE" > "$tmp_file"
+  mv "$tmp_file" "$ENV_FILE"
 
 }
 
@@ -202,15 +232,15 @@ preflight_compose_sanity() {
 }
 
 write_install_env() {
-  cat > "$INSTALL_ENV_FILE" <<ENV
-ROOT_ADMIN_USERNAME=$ROOT_ADMIN_USERNAME
-ROOT_ADMIN_DISPLAY_NAME=$ROOT_ADMIN_DISPLAY_NAME
-EXISTING_ADMIN_DB=$EXISTING_ADMIN_DB
-ENABLE_AI=$ENABLE_AI
-BOT_USERNAME=${BOT_USERNAME:-}
-BOT_DISPLAY_NAME=${BOT_DISPLAY_NAME:-}
-BOT_COLOR=${BOT_COLOR:-}
-ENV
+  {
+    printf 'ROOT_ADMIN_USERNAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_USERNAME")"
+    printf 'ROOT_ADMIN_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_DISPLAY_NAME")"
+    printf 'EXISTING_ADMIN_DB=%s\n' "$(sanitize_env_value "$EXISTING_ADMIN_DB")"
+    printf 'ENABLE_AI=%s\n' "$(sanitize_env_value "$ENABLE_AI")"
+    printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "${BOT_USERNAME:-}")"
+    printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "${BOT_DISPLAY_NAME:-}")"
+    printf 'BOT_COLOR=%s\n' "$(sanitize_env_value "${BOT_COLOR:-}")"
+  } > "$INSTALL_ENV_FILE"
   chmod 600 "$INSTALL_ENV_FILE" 2>/dev/null || true
 }
 
@@ -234,20 +264,24 @@ bootstrap_root_admin() {
 
   local payload
   payload=$(printf '{"username":"%s","displayName":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_DISPLAY_NAME" "$ROOT_ADMIN_PASSWORD")
-  local status
-  status=$(curl -sS -o /tmp/grish_bootstrap.json -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
+  local status resp
+  resp="$(mktemp /tmp/grish-bootstrap.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
 
   if [[ "$status" == "200" ]]; then
+    rm -f "$resp"
     log "Root admin created successfully."
     return 0
   fi
 
   if [[ "$status" == "409" ]]; then
+    rm -f "$resp"
     log "Root admin bootstrap already initialized; continuing with login verification."
     return 0
   fi
 
-  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  rm -f "$resp"
+  err "root bootstrap failed (HTTP $status)"
   exit 1
 }
 
@@ -255,32 +289,41 @@ login_admin() {
   local base_url="$1"
   local payload
   payload=$(printf '{"username":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD")
-  local status
-  status=$(curl -sS -o /tmp/grish_login.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
-  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status): $(cat /tmp/grish_login.json 2>/dev/null || true)"; exit 1; }
+  local status resp
+  resp="$(mktemp /tmp/grish-login.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
+  rm -f "$resp"
+  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status)"; exit 1; }
 }
 
 create_invite_key() {
   local base_url="$1"
-  local status
-  status=$(curl -sS -o /tmp/grish_invite.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/admin/invites" -d '{}' || true)
-  [[ "$status" == "200" ]] || { err "invite creation failed (HTTP $status): $(cat /tmp/grish_invite.json 2>/dev/null || true)"; exit 1; }
-  cat /tmp/grish_invite.json | json_field inviteKey
+  local status resp
+  resp="$(mktemp /tmp/grish-invite.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/admin/invites" -d '{}' || true)
+  [[ "$status" == "200" ]] || { rm -f "$resp"; err "invite creation failed (HTTP $status)"; exit 1; }
+  local invite
+  invite="$(json_field inviteKey < "$resp")"
+  rm -f "$resp"
+  printf '%s' "$invite"
 }
 
 register_user_with_invite() {
   local base_url="$1" invite="$2" username="$3" display="$4" password="$5"
-  local payload status
+  local payload status resp
   payload=$(printf '{"inviteToken":"%s","username":"%s","displayName":"%s","password":"%s"}' "$invite" "$username" "$display" "$password")
-  status=$(curl -sS -o /tmp/grish_register.json -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/register" -d "$payload" || true)
+  resp="$(mktemp /tmp/grish-register.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/register" -d "$payload" || true)
   [[ "$status" == "200" ]] || {
-    if grep -q 'invalid_invite' /tmp/grish_register.json 2>/dev/null; then
+    if grep -q 'invalid_invite' "$resp" 2>/dev/null; then
       err "registration failed due to invalid invite"
     else
-      warn "user registration returned HTTP $status: $(cat /tmp/grish_register.json 2>/dev/null || true)"
+      warn "user registration returned HTTP $status"
     fi
+    rm -f "$resp"
     return 1
   }
+  rm -f "$resp"
   return 0
 }
 
@@ -324,13 +367,13 @@ write_aibot_env() {
     model="$(awk -F= '/^OLLAMA_MODEL=/{print substr($0,index($0,"=")+1)}' "$APP_DIR/.ollama.env" | tail -n1)"
   fi
   model="${model:-gemma3:4b}"
-  cat > "$APP_DIR/.aibot.env" <<ENV
-BOT_USERNAME=$BOT_USERNAME
-BOT_DISPLAY_NAME=$BOT_DISPLAY_NAME
-BOT_COLOR=$BOT_COLOR
-OLLAMA_MODEL=$model
-BOT_CONVO_TTL_MS=900000
-ENV
+  {
+    printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "$BOT_USERNAME")"
+    printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$BOT_DISPLAY_NAME")"
+    printf 'BOT_COLOR=%s\n' "$(sanitize_env_value "$BOT_COLOR")"
+    printf 'OLLAMA_MODEL=%s\n' "$(sanitize_env_value "$model")"
+    printf 'BOT_CONVO_TTL_MS=900000\n'
+  } > "$APP_DIR/.aibot.env"
   chmod 600 "$APP_DIR/.aibot.env" 2>/dev/null || true
   set_env_key OLLAMA_MODEL "$model"
 }

@@ -18,7 +18,7 @@ Usage: ./scripts/grishcordctl.sh <command>
 
 Commands:
   start         Build + start services in detached mode, then wait for readiness
-  restart       Restart running services (compose restart) and wait for readiness
+  restart       Recreate app services (backend/frontend/bot/caddy) and wait for readiness
   stop          Stop the stack (compose down --remove-orphans)
   update-start  Pull latest images, rebuild, start, and wait for readiness
   status        Show compose status + LAN URL hint
@@ -59,8 +59,19 @@ require_bin() {
 
 safe_load_install_meta() {
   [[ -f "$INSTALL_META_FILE" ]] || return 0
-  # shellcheck disable=SC1090
-  source "$INSTALL_META_FILE"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in
+      INSTALL_METHOD|ARCHIVE_URL)
+        printf -v "$key" '%s' "$value"
+        ;;
+    esac
+  done < "$INSTALL_META_FILE"
 }
 
 ensure_docker_access() {
@@ -114,6 +125,48 @@ validate_https_env() {
       exit 1
     fi
   fi
+}
+
+ensure_compose_env_file() {
+  if [[ -f "$COMPOSE_ENV_FILE" ]]; then
+    return 0
+  fi
+  if [[ -f "$APP_DIR_REAL/.env.example" ]]; then
+    cp "$APP_DIR_REAL/.env.example" "$COMPOSE_ENV_FILE"
+    err "Created $COMPOSE_ENV_FILE from .env.example."
+    err "Set at least JWT_SECRET, PUBLIC_BASE_URL/CORS_ORIGINS, and CADDY_SITE_ADDRESS before starting services."
+    exit 1
+  fi
+  err "Missing $COMPOSE_ENV_FILE and .env.example; cannot continue."
+  exit 1
+}
+
+jwt_secret_looks_placeholder() {
+  local raw="$1"
+  local s compact
+  s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  compact="$(printf '%s' "$s" | tr -d '_-')"
+  [[ -z "$s" ]] && return 0
+  [[ "$s" == "change-me" || "$s" == "changeme" || "$s" == "replace_with_long_random_secret" || "$s" == "replacewithlongrandomsecret" || "$s" == "jwtsecret" || "$s" == "yourjwtsecret" ]] && return 0
+  [[ "$compact" == *"changeme"* || "$compact" == *"replacewith"* ]]
+}
+
+validate_jwt_secret_env() {
+  local env_file="$APP_DIR_REAL/.env"
+  [[ -f "$env_file" ]] || return 0
+  local jwt_secret
+  jwt_secret="$(awk -F= '/^JWT_SECRET=/{print substr($0,index($0,"=")+1)}' "$env_file" | tail -n 1 | sed 's/^"//; s/"$//' || true)"
+  if [[ -z "$jwt_secret" || ${#jwt_secret} -lt 32 ]] || jwt_secret_looks_placeholder "$jwt_secret"; then
+    err "Startup preflight failed: JWT_SECRET in $env_file is missing, too short, or placeholder-like."
+    err "Set a non-placeholder random JWT_SECRET with at least 32 characters, then run restart/start again."
+    exit 1
+  fi
+}
+
+print_backend_failure_diagnostics() {
+  err "Backend failed to become ready. Showing recent backend logs (tail 80)."
+  compose_cmd logs --no-color --tail 80 backend || true
+  err "Check .env JWT_SECRET and trusted origin config (PUBLIC_BASE_URL/CORS_ORIGINS)."
 }
 
 get_lan_ip() {
@@ -252,6 +305,7 @@ wait_for_service() {
     if [[ "$status" == exited || "$status" == dead ]]; then
       printf '\n'
       err "$service entered terminal state: $status"
+      [[ "$service" == "backend" ]] && print_backend_failure_diagnostics
       return 1
     fi
 
@@ -263,6 +317,7 @@ wait_for_service() {
     if (( elapsed >= timeout_s )); then
       printf '\n'
       err "timed out waiting for $service (last status: $status)."
+      [[ "$service" == "backend" ]] && print_backend_failure_diagnostics
       return 1
     fi
     sleep 1
@@ -357,8 +412,7 @@ update_start_stack() {
 }
 
 restart_stack() {
-  run_with_timer "compose restart" compose_cmd restart
-  run_with_timer "bot module reload (recreate bot)" compose_cmd up -d --no-deps --force-recreate bot
+  run_with_timer "compose recreate app services" compose_cmd up -d --no-deps --force-recreate backend frontend bot caddy
   wait_for_service postgres 180
   wait_for_service backend 180
   wait_for_service frontend 120
@@ -401,7 +455,11 @@ main() {
   ensure_docker_access
   require_bin curl
   infer_and_export_caddy_site_from_public_base
+  if [[ "$cmd" == "start" || "$cmd" == "restart" || "$cmd" == "update-start" ]]; then
+    ensure_compose_env_file
+  fi
   validate_https_env
+  validate_jwt_secret_env
 
   case "$cmd" in
     start) start_stack ;;
