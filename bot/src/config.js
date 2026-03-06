@@ -5,7 +5,11 @@ const DEFAULTS = {
   GRISHCORD_BASE_URL: 'http://backend:3000',
   BOT_OLLAMA_TIMEOUT_MS: '30000',
   BOT_MAX_REPLY_CHARS: '1800',
-  BOT_CONTEXT_MAX_MESSAGES: '30',
+  BOT_CONTEXT_MAX_MESSAGES: '10',
+  BOT_ENABLE_DMS: 'true',
+  BOT_ENABLE_CHANNELS: 'true',
+  BOT_ALLOWED_CHANNEL_IDS: '',
+  BOT_REPLY_ON_ERROR: 'false',
   BOT_CONVO_TTL_MS: '900000',
   BOT_RATE_LIMIT_MS: '2000',
   BOT_MAX_CONCURRENCY_PER_CHANNEL: '1',
@@ -33,6 +37,24 @@ function toInt(v, fallback) {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
 
+
+function toBool(v, fallback) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(s)) return true;
+  if (['0', 'false', 'no', 'off'].includes(s)) return false;
+  return fallback;
+}
+
+function toIdList(v) {
+  return [...new Set(
+    String(v || '')
+      .split(',')
+      .map((x) => Number(String(x || '').trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  )];
+}
+
 export function loadConfig() {
   const aibotFile = process.env.BOT_CONFIG_FILE || '/config/.aibot.env';
   const ollamaFile = process.env.OLLAMA_CONFIG_FILE || '/config/.ollama.env';
@@ -54,7 +76,11 @@ export function loadConfig() {
     ollamaModel: get('OLLAMA_MODEL'),
     ollamaTimeoutMs: toInt(get('BOT_OLLAMA_TIMEOUT_MS'), 30000),
     maxReplyChars: toInt(get('BOT_MAX_REPLY_CHARS'), 1800),
-    contextMaxMessages: toInt(get('BOT_CONTEXT_MAX_MESSAGES'), 30),
+    contextMaxMessages: toInt(get('BOT_CONTEXT_MAX_MESSAGES'), 10),
+    enableDms: toBool(get('BOT_ENABLE_DMS'), true),
+    enableChannels: toBool(get('BOT_ENABLE_CHANNELS'), true),
+    allowedChannelIds: toIdList(get('BOT_ALLOWED_CHANNEL_IDS')),
+    replyOnError: toBool(get('BOT_REPLY_ON_ERROR'), false),
     convoTtlMs: toInt(get('BOT_CONVO_TTL_MS'), 900000),
     rateLimitMs: toInt(get('BOT_RATE_LIMIT_MS'), 2000),
     maxConcurrencyPerChannel: Math.max(1, toInt(get('BOT_MAX_CONCURRENCY_PER_CHANNEL'), 1)),

@@ -43,6 +43,30 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
+sanitize_env_value() {
+  local v="$1"
+  v="${v//$'\r'/ }"
+  v="${v//$'\n'/ }"
+  printf '%s' "$v" | tr -d '\000-\010\013\014\016-\037\177'
+}
+
+load_data_env_file() {
+  local f="$1"
+  local allowed="$2"
+  [[ -f "$f" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case ",$allowed," in
+      *",$key,"*) printf -v "$key" '%s' "$(sanitize_env_value "$value")" ;;
+    esac
+  done < "$f"
+}
+
 run_root() {
   if [[ "${EUID}" -eq 0 ]]; then
     "$@"
@@ -55,20 +79,12 @@ run_root() {
 }
 
 load_env() {
-  [[ -f "$OLLAMA_ENV_FILE" ]] || return 0
-  set -a
-  # shellcheck disable=SC1090
-  source "$OLLAMA_ENV_FILE"
-  set +a
+  load_data_env_file "$OLLAMA_ENV_FILE" "OLLAMA_MODELS,OLLAMA_MODEL,OLLAMA_BIND_MODE"
 }
 
 load_file_env() {
   local f="$1"
-  [[ -f "$f" ]] || return 0
-  set -a
-  # shellcheck disable=SC1090
-  source "$f"
-  set +a
+  load_data_env_file "$f" "BOT_USERNAME,BOT_DISPLAY_NAME,BOT_COLOR,OLLAMA_MODEL,BOT_CONVO_TTL_MS"
 }
 
 bind_mode_to_host() {
@@ -87,11 +103,11 @@ save_env() {
   local models="$1"
   local model="$2"
   local bind_mode="$3"
-  cat > "$OLLAMA_ENV_FILE" <<ENV
-OLLAMA_MODELS=$models
-OLLAMA_MODEL=$model
-OLLAMA_BIND_MODE=$bind_mode
-ENV
+  {
+    printf 'OLLAMA_MODELS=%s\n' "$(sanitize_env_value "$models")"
+    printf 'OLLAMA_MODEL=%s\n' "$(sanitize_env_value "$model")"
+    printf 'OLLAMA_BIND_MODE=%s\n' "$(sanitize_env_value "$bind_mode")"
+  } > "$OLLAMA_ENV_FILE"
   chmod 600 "$OLLAMA_ENV_FILE" 2>/dev/null || true
   echo "Saved config to $OLLAMA_ENV_FILE"
 }
@@ -306,13 +322,13 @@ write_bot_config() {
   local model="$4"
   local ttl="$5"
 
-  cat > "$AIBOT_ENV_FILE" <<ENV
-BOT_USERNAME=$username
-BOT_DISPLAY_NAME=$display
-BOT_COLOR=$color
-OLLAMA_MODEL=$model
-BOT_CONVO_TTL_MS=$ttl
-ENV
+  {
+    printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "$username")"
+    printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$display")"
+    printf 'BOT_COLOR=%s\n' "$(sanitize_env_value "$color")"
+    printf 'OLLAMA_MODEL=%s\n' "$(sanitize_env_value "$model")"
+    printf 'BOT_CONVO_TTL_MS=%s\n' "$(sanitize_env_value "$ttl")"
+  } > "$AIBOT_ENV_FILE"
   chmod 600 "$AIBOT_ENV_FILE" 2>/dev/null || true
   echo "Saved bot config to $AIBOT_ENV_FILE"
 }
