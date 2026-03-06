@@ -25,9 +25,14 @@ Local runtime config files (`.env`, `.install.env`, `.aibot.env`, `.ollama.env`)
 Re-run safely at any time:
 - `./install_grishcord.sh`
 
+## First-run config
+- Copy `.env.example` to `.env`.
+- Set a real random `JWT_SECRET` (at least 32 chars; not placeholder-like values).
+- Treat `.env` as local-only runtime config: do not commit or ship it in release artifacts.
+
 ## Operations
 - `./scripts/grishcordctl.sh start` (verbose build/start with live timers + readiness waits)
-- `./scripts/grishcordctl.sh restart` (fast service restart + readiness waits)
+- `./scripts/grishcordctl.sh restart` (recreate backend/frontend/bot/caddy so `.env` changes apply, then wait for readiness)
 - `./scripts/grishcordctl.sh stop` (verbose stop)
 - `./scripts/grishcordctl.sh update-start` (pull, rebuild, start with live timers)
 - `./scripts/grishcordctl.sh status` (compose status + LAN URL)
@@ -55,6 +60,7 @@ Re-run safely at any time:
 
 ## Security-sensitive config
 - `JWT_SECRET` is required and backend startup now fails if it is missing, too short (<32 chars), or placeholder-like (for example `change-me` or `replace_with_long_random_secret`).
+- `grishcordctl` preflights `JWT_SECRET` before start/restart/update-start and aborts early with a clear message if it is invalid.
 - `PUBLIC_BASE_URL` and/or `CORS_ORIGINS` must resolve to valid trusted origins (for example `https://chat.example.com`).
 - In production/container-style deployments, backend startup fails closed when trusted origin config is empty or invalid.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
@@ -168,6 +174,7 @@ Optional:
 - `BOT_ENABLE_DMS` (default `true`)
 - `BOT_ENABLE_CHANNELS` (default `true`)
 - `BOT_ALLOWED_CHANNEL_IDS` (optional comma-separated channel id allowlist)
+- `BOT_REPLY_ON_ERROR` (default `false`; send a short fallback reply on timeout/error/empty output)
 
 ### Manual verification checklist (acceptance)
 1. Start Grishcord + bot (`./scripts/grishcordctl.sh start`) and confirm bot logs show successful login and WebSocket connection.

@@ -913,6 +913,71 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
   res.json(rows);
 });
 
+app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) => {
+  const channelId = req.query.channelId ? Number(req.query.channelId) : null;
+  const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
+  const hasChannel = Number.isFinite(channelId) && channelId > 0;
+  const hasDm = Number.isFinite(dmPeerId) && dmPeerId > 0;
+  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return res.status(400).json({ error: 'scope_required' });
+
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100)));
+  let rows;
+  if (hasChannel) {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id, m.dm_peer_id, m.reply_to,
+               u.username, u.display_name, u.display_color,
+               rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        WHERE m.channel_id = $1
+        ORDER BY m.id DESC
+        LIMIT $2
+      ) r
+      ORDER BY r.id ASC
+    `, [channelId, limit]));
+  } else {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id,
+               CASE WHEN m.author_id = $1 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
+               u.username, u.display_name, u.display_color,
+               LEAST(m.author_id, m.dm_peer_id) AS dm_user_a,
+               GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b,
+               m.reply_to, rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        WHERE (m.author_id = $1 AND m.dm_peer_id = $2) OR (m.author_id = $2 AND m.dm_peer_id = $1)
+        ORDER BY m.id DESC
+        LIMIT $3
+      ) r
+      ORDER BY r.id ASC
+    `, [req.user.sub, dmPeerId, limit]));
+  }
+
+  const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
+  const byId = new Map();
+  if (messageIds.length) {
+    const upl = await pool.query('SELECT mu.message_id, u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = ANY($1::bigint[]) ORDER BY u.id ASC', [messageIds]);
+    for (const r of upl.rows) {
+      const arr = byId.get(Number(r.message_id)) || [];
+      arr.push({ id: r.id, content_type: r.content_type, url: `/api/uploads/${r.id}` });
+      byId.set(Number(r.message_id), arr);
+    }
+  }
+  for (const r of rows) {
+    r.uploads = byId.get(Number(r.id)) || [];
+  }
+
+  const hasTrigger = rows.some((r) => Number(r.id) === triggerId);
+  if (!hasTrigger) return res.status(404).json({ error: 'not_found' });
+  res.json(rows);
+});
+
 app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res) => {
   const triggerId = Number(req.params.id);
   const channelId = req.query.channelId ? Number(req.query.channelId) : null;

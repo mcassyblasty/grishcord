@@ -137,19 +137,20 @@ export class NotificationBot {
         const rows = await this.client.getDmWindow(messageId, dmPeerId, this.config.contextMaxMessages);
         const triggerCount = rows.filter((r) => Number(r.id) === messageId).length;
         if (triggerCount === 0) {
-          console.warn('[aibot] missing trigger in dm window', { dmPeerId, messageId });
+          console.warn('[aibot] missing trigger in window', { mode: 'dm', dmPeerId, triggerId: messageId });
           return;
         }
         if (triggerCount > 1) {
-          console.warn('[aibot] duplicate trigger in dm window', { dmPeerId, messageId, triggerCount });
+          console.warn('[aibot] duplicate trigger in window', { mode: 'dm', dmPeerId, triggerId: messageId, triggerCount });
           return;
         }
         const trigger = rows.find((r) => Number(r.id) === messageId);
         if (Number(trigger.author_id) === this.botUserId) return;
 
         const llmMessages = await this.#buildMessages(rows);
+        this.#logContextWindow({ mode: 'dm', triggerId: messageId, llmMessages, allowlistApplied: false });
         if (llmMessages.length <= 1) {
-          console.warn('[aibot] unexpected empty context for dm window', { dmPeerId, messageId });
+          console.warn('[aibot] unexpected empty context window', { mode: 'dm', dmPeerId, triggerId: messageId });
           return;
         }
         let raw;
@@ -157,20 +158,25 @@ export class NotificationBot {
           raw = await this.ollama.generate(llmMessages);
         } catch (err) {
           if (String(err?.message || '').toLowerCase().includes('timeout')) {
-            console.error('[aibot] llm timeout for dm reply', { dmPeerId, messageId, error: err.message });
+            console.error('[aibot] ollama timeout', { mode: 'dm', dmPeerId, triggerId: messageId, error: err.message });
+            await this.#maybeSendErrorReply({ mode: 'dm', dmPeerId, messageId, fallbackText: 'Timed out, try again.', reason: 'timeout' });
+          } else {
+            console.error('[aibot] ollama error', { mode: 'dm', dmPeerId, triggerId: messageId, error: err.message });
+            await this.#maybeSendErrorReply({ mode: 'dm', dmPeerId, messageId, fallbackText: 'I hit an error, try again.', reason: 'ollama_error' });
           }
           throw err;
         }
         const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
         if (!safe) {
-          console.warn('[aibot] empty model output for dm reply', { dmPeerId, messageId });
+          console.warn('[aibot] empty model output', { mode: 'dm', dmPeerId, triggerId: messageId });
+          await this.#maybeSendErrorReply({ mode: 'dm', dmPeerId, messageId, fallbackText: 'I hit an error, try again.', reason: 'empty_model_output' });
           return;
         }
 
         try {
           await this.client.postDmReply(dmPeerId, messageId, safe);
         } catch (err) {
-          console.error('[aibot] dm reply post failed', { dmPeerId, messageId, error: err.message });
+          console.error('[aibot] reply post failed', { mode: 'dm', dmPeerId, triggerId: messageId, error: err.message });
           throw err;
         }
         this.lastReplyAtByConversation.set(conversationKey, nowMs());
@@ -194,19 +200,20 @@ export class NotificationBot {
       const rows = await this.client.getChannelWindow(messageId, channelId, this.config.contextMaxMessages);
       const triggerCount = rows.filter((r) => Number(r.id) === messageId).length;
       if (triggerCount === 0) {
-        console.warn('[aibot] missing trigger in channel window', { channelId, messageId });
+        console.warn('[aibot] missing trigger in window', { mode: 'channel', channelId, triggerId: messageId });
         return;
       }
       if (triggerCount > 1) {
-        console.warn('[aibot] duplicate trigger in channel window', { channelId, messageId, triggerCount });
+        console.warn('[aibot] duplicate trigger in window', { mode: 'channel', channelId, triggerId: messageId, triggerCount });
         return;
       }
       const trigger = rows.find((r) => Number(r.id) === messageId);
       if (Number(trigger.author_id) === this.botUserId) return;
 
       const llmMessages = await this.#buildMessages(rows);
+      this.#logContextWindow({ mode: 'channel', triggerId: messageId, llmMessages, allowlistApplied: Array.isArray(this.config.allowedChannelIds) && this.config.allowedChannelIds.length > 0 });
       if (llmMessages.length <= 1) {
-        console.warn('[aibot] unexpected empty context for channel window', { channelId, messageId });
+        console.warn('[aibot] unexpected empty context window', { mode: 'channel', channelId, triggerId: messageId });
         return;
       }
       let raw;
@@ -214,24 +221,55 @@ export class NotificationBot {
         raw = await this.ollama.generate(llmMessages);
       } catch (err) {
         if (String(err?.message || '').toLowerCase().includes('timeout')) {
-          console.error('[aibot] llm timeout for channel reply', { channelId, messageId, error: err.message });
+          console.error('[aibot] ollama timeout', { mode: 'channel', channelId, triggerId: messageId, error: err.message });
+          await this.#maybeSendErrorReply({ mode: 'channel', channelId, messageId, fallbackText: 'Timed out, try again.', reason: 'timeout' });
+        } else {
+          console.error('[aibot] ollama error', { mode: 'channel', channelId, triggerId: messageId, error: err.message });
+          await this.#maybeSendErrorReply({ mode: 'channel', channelId, messageId, fallbackText: 'I hit an error, try again.', reason: 'ollama_error' });
         }
         throw err;
       }
       const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
       if (!safe) {
-        console.warn('[aibot] empty model output for channel reply', { channelId, messageId });
+        console.warn('[aibot] empty model output', { mode: 'channel', channelId, triggerId: messageId });
+        await this.#maybeSendErrorReply({ mode: 'channel', channelId, messageId, fallbackText: 'I hit an error, try again.', reason: 'empty_model_output' });
         return;
       }
 
       try {
         await this.client.postReply(channelId, messageId, safe);
       } catch (err) {
-        console.error('[aibot] channel reply post failed', { channelId, messageId, error: err.message });
+        console.error('[aibot] reply post failed', { mode: 'channel', channelId, triggerId: messageId, error: err.message });
         throw err;
       }
       this.lastReplyAtByConversation.set(conversationKey, nowMs());
       this.#remember(conversationKey, { role: 'assistant', content: safe });
+    });
+  }
+
+
+  async #maybeSendErrorReply({ mode, channelId = null, dmPeerId = null, messageId, fallbackText, reason }) {
+    if (!this.config.replyOnError) return;
+    try {
+      if (mode === 'dm' && Number.isFinite(Number(dmPeerId)) && Number(dmPeerId) > 0) {
+        await this.client.postDmReply(Number(dmPeerId), Number(messageId), fallbackText);
+      } else if (mode === 'channel' && Number.isFinite(Number(channelId)) && Number(channelId) > 0) {
+        await this.client.postReply(Number(channelId), Number(messageId), fallbackText);
+      } else {
+        return;
+      }
+      console.warn('[aibot] sent fallback reply', { mode, channelId, dmPeerId, messageId, reason });
+    } catch (err) {
+      console.error('[aibot] fallback reply failed', { mode, channelId, dmPeerId, messageId, reason, error: err.message });
+    }
+  }
+
+  #logContextWindow({ mode, triggerId, llmMessages, allowlistApplied }) {
+    console.info('[aibot] context window', {
+      mode,
+      triggerId,
+      messagesToModel: Math.max(0, Number(llmMessages?.length || 0) - 1),
+      allowlistApplied: Boolean(allowlistApplied)
     });
   }
 
