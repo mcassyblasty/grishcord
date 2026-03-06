@@ -16,6 +16,14 @@ function toLlmMessage(row, botUserId) {
   return { role: who, content: `${name}: ${String(row.body || '').trim()}`.trim() };
 }
 
+function isChannelBotTrigger(notification) {
+  const kind = String(notification?.kind || '').toLowerCase();
+  if (kind) return kind === 'ping';
+  // Trigger model: channel bot replies only to ping notifications; fallback to title for payloads without kind.
+  const title = String(notification?.title || '').toLowerCase();
+  return title.includes('ping');
+}
+
 class ConversationQueue {
   constructor(maxConcurrency) {
     this.maxConcurrency = Math.max(1, Number(maxConcurrency || 1));
@@ -58,7 +66,8 @@ export class NotificationBot {
     this.ollama = ollama;
     this.botUserId = Number(botUserId);
     this.lastReplyAtByConversation = new Map();
-    this.contextByConversation = new Map();
+    this.systemPrompt = null;
+    this.systemPromptLoadPromise = null;
     this.queue = new ConversationQueue(config.maxConcurrencyPerChannel);
   }
 
@@ -117,8 +126,7 @@ export class NotificationBot {
         console.log('[aibot] ignoring notification: channel not in BOT_ALLOWED_CHANNEL_IDS', notification.channelId || null);
         return;
       }
-      const title = String(notification.title || '').toLowerCase();
-      if (!title.includes('ping')) return;
+      if (!isChannelBotTrigger(notification)) return;
     }
 
     const messageId = Number(notification.messageId || 0);
@@ -180,7 +188,6 @@ export class NotificationBot {
           throw err;
         }
         this.lastReplyAtByConversation.set(conversationKey, nowMs());
-        this.#remember(conversationKey, { role: 'assistant', content: safe });
       });
       return;
     }
@@ -243,7 +250,6 @@ export class NotificationBot {
         throw err;
       }
       this.lastReplyAtByConversation.set(conversationKey, nowMs());
-      this.#remember(conversationKey, { role: 'assistant', content: safe });
     });
   }
 
@@ -273,23 +279,29 @@ export class NotificationBot {
     });
   }
 
+  async #getSystemPrompt() {
+    if (this.systemPrompt !== null) return this.systemPrompt;
+    if (!this.systemPromptLoadPromise) {
+      this.systemPromptLoadPromise = fs.promises.readFile(this.config.promptFile, 'utf8')
+        .then((prompt) => {
+          this.systemPrompt = prompt;
+          return prompt;
+        })
+        .catch((err) => {
+          console.error('[aibot] failed to load prompt file', { path: this.config.promptFile, error: err.message });
+          this.systemPromptLoadPromise = null;
+          throw err;
+        });
+    }
+    return this.systemPromptLoadPromise;
+  }
+
   async #buildMessages(rows) {
-    const systemPrompt = fs.readFileSync(this.config.promptFile, 'utf8');
+    const systemPrompt = await this.#getSystemPrompt();
     const turns = rows
       .slice(-this.config.contextMaxMessages)
       .map((r) => toLlmMessage(r, this.botUserId));
     return [{ role: 'system', content: systemPrompt }, ...turns];
   }
 
-  #remember(conversationKey, newTurnOrTurns) {
-    const key = String(conversationKey);
-    const curr = this.contextByConversation.get(key);
-    const nextTurns = Array.isArray(newTurnOrTurns)
-      ? newTurnOrTurns
-      : [...(curr?.turns || []), newTurnOrTurns];
-    this.contextByConversation.set(key, {
-      turns: nextTurns.slice(-this.config.contextMaxMessages),
-      lastTouchedAt: nowMs()
-    });
-  }
 }

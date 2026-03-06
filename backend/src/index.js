@@ -174,15 +174,36 @@ function isTrustedBrowserOrigin(origin) {
   return corsAllowedOrigins.includes(normalizeOrigin(origin));
 }
 
+function canUserReadDm(userId, dmPeerId) {
+  // DM scope boundary: valid DM reads require an authenticated user and explicit peer scope.
+  const uid = Number(userId || 0);
+  const peer = Number(dmPeerId || 0);
+  return uid > 0 && peer > 0;
+}
+
+function canUserReadDmMessage(userId, authorId, dmPeerId) {
+  // DM message privacy boundary: only sender/peer participants may read this message.
+  const uid = Number(userId || 0);
+  if (!uid) return false;
+  return uid === Number(authorId) || uid === Number(dmPeerId);
+}
+
+function canUserReadChannel(userId, channelId) {
+  // Current product model: channels are readable to authenticated users.
+  // Future private-channel ACL checks should be added here.
+  const uid = Number(userId || 0);
+  if (!uid) return false;
+  return Number.isFinite(Number(channelId)) && Number(channelId) > 0;
+}
+
 function wsCanReceiveChannelEvent(ws, channelId) {
-  if (!Number.isFinite(Number(channelId)) || !ws?.subscribedChannelIds) return false;
+  if (!ws?.subscribedChannelIds) return false;
+  if (!canUserReadChannel(ws?.userId, channelId)) return false;
   return ws.subscribedChannelIds.has(Number(channelId));
 }
 
 function wsCanReceiveDmEvent(ws, authorId, dmPeerId) {
-  const userId = Number(ws?.userId || 0);
-  if (!userId) return false;
-  return userId === Number(authorId) || userId === Number(dmPeerId);
+  return canUserReadDmMessage(ws?.userId, authorId, dmPeerId);
 }
 
 app.use(cors({ origin: corsOriginValidator, credentials: true }));
@@ -859,14 +880,30 @@ app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) =>
   res.json({ ok: true });
 });
 
-app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
-  const since = Number(req.params.id);
+function parseMessageScopeFromQuery(req) {
   const channelId = req.query.channelId ? Number(req.query.channelId) : null;
   const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
   const hasChannel = Number.isFinite(channelId) && channelId > 0;
   const hasDm = Number.isFinite(dmPeerId) && dmPeerId > 0;
+  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return null;
+  return { channelId, dmPeerId, hasChannel, hasDm };
+}
+
+function parseMessageLimit(rawValue, defaultLimit, maxLimit) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return defaultLimit;
+  return Math.max(1, Math.min(maxLimit, Math.floor(parsed)));
+}
+
+app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
+  const since = Number(req.params.id);
+  const scope = parseMessageScopeFromQuery(req);
   if (!Number.isFinite(since) || since < 0) return res.status(400).json({ error: 'invalid_id' });
-  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return res.status(400).json({ error: 'scope_required' });
+  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  const { channelId, dmPeerId, hasChannel } = scope;
+  const limit = parseMessageLimit(undefined, 500, 500);
+  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
+  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
 
   let rows;
   if (hasChannel) {
@@ -878,8 +915,8 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
       JOIN users u ON u.id=m.author_id
       LEFT JOIN messages rm ON rm.id = m.reply_to
       WHERE m.id > $1 AND m.channel_id = $2
-      ORDER BY m.id ASC LIMIT 500
-    `, [since, channelId]));
+      ORDER BY m.id ASC LIMIT $3
+    `, [since, channelId, limit]));
   } else {
     ({ rows } = await pool.query(`
       SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id,
@@ -894,8 +931,8 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
       WHERE m.id > $1
         AND ((m.author_id = $2 AND m.dm_peer_id = $3) OR (m.author_id = $3 AND m.dm_peer_id = $2))
       ORDER BY m.id ASC
-      LIMIT 500
-    `, [since, req.user.sub, dmPeerId]));
+      LIMIT $4
+    `, [since, req.user.sub, dmPeerId, limit]));
   }
   const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
   const byId = new Map();
@@ -914,13 +951,13 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
 });
 
 app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) => {
-  const channelId = req.query.channelId ? Number(req.query.channelId) : null;
-  const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
-  const hasChannel = Number.isFinite(channelId) && channelId > 0;
-  const hasDm = Number.isFinite(dmPeerId) && dmPeerId > 0;
-  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return res.status(400).json({ error: 'scope_required' });
+  const scope = parseMessageScopeFromQuery(req);
+  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  const { channelId, dmPeerId, hasChannel } = scope;
+  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
+  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
 
-  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100)));
+  const limit = parseMessageLimit(req.query.limit, 100, 200);
   let rows;
   if (hasChannel) {
     ({ rows } = await pool.query(`
@@ -980,14 +1017,14 @@ app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) =>
 
 app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res) => {
   const triggerId = Number(req.params.id);
-  const channelId = req.query.channelId ? Number(req.query.channelId) : null;
-  const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
-  const hasChannel = Number.isFinite(channelId) && channelId > 0;
-  const hasDm = Number.isFinite(dmPeerId) && dmPeerId > 0;
+  const scope = parseMessageScopeFromQuery(req);
   if (!Number.isFinite(triggerId) || triggerId <= 0) return res.status(400).json({ error: 'invalid_id' });
-  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return res.status(400).json({ error: 'scope_required' });
+  if (!scope) return res.status(400).json({ error: 'scope_required' });
+  const { channelId, dmPeerId, hasChannel } = scope;
+  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) return res.status(403).json({ error: 'forbidden' });
+  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) return res.status(403).json({ error: 'forbidden' });
 
-  const limit = Math.max(1, Math.min(100, Number(req.query.limit || 10)));
+  const limit = parseMessageLimit(req.query.limit, 10, 100);
   let rows;
   if (hasChannel) {
     ({ rows } = await pool.query(`
@@ -1049,23 +1086,24 @@ app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res
 
 async function resolveAccessibleUpload(userId, uploadId) {
   const { rows } = await pool.query(`
-    SELECT u.id, u.storage_name, u.content_type
+    SELECT u.id, u.storage_name, u.content_type, m.author_id, m.dm_peer_id, m.channel_id
     FROM uploads u
+    JOIN message_uploads mu ON mu.upload_id = u.id
+    JOIN messages m ON m.id = mu.message_id
     WHERE u.id = $1
-      AND EXISTS (
-        SELECT 1
-        FROM message_uploads mu
-        JOIN messages m ON m.id = mu.message_id
-        -- Access boundary: upload is readable only through an accessible attached message.
-        WHERE mu.upload_id = u.id
-          AND (
-            m.channel_id IS NOT NULL
-            OR (m.dm_peer_id IS NOT NULL AND (m.author_id = $2 OR m.dm_peer_id = $2))
-          )
-      )
-    LIMIT 1
-  `, [uploadId, userId]);
-  return rows[0] || null;
+    ORDER BY m.id DESC
+  `, [uploadId]);
+
+  for (const r of rows) {
+    const isDm = Number.isFinite(Number(r.dm_peer_id)) && Number(r.dm_peer_id) > 0;
+    if (isDm && canUserReadDmMessage(userId, r.author_id, r.dm_peer_id)) {
+      return { id: r.id, storage_name: r.storage_name, content_type: r.content_type };
+    }
+    if (!isDm && canUserReadChannel(userId, r.channel_id)) {
+      return { id: r.id, storage_name: r.storage_name, content_type: r.content_type };
+    }
+  }
+  return null;
 }
 
 app.post('/api/upload-image', auth, enforceSessionVersion, upload.single('image'), async (req, res) => {
