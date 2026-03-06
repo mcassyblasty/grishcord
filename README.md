@@ -20,6 +20,7 @@ The installer asks for:
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
 
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
+Local runtime config files (`.env`, `.install.env`, `.aibot.env`, `.ollama.env`) are intentionally gitignored and should stay private.
 
 Re-run safely at any time:
 - `./install_grishcord.sh`
@@ -44,6 +45,7 @@ Re-run safely at any time:
 - Canonical app version: `VERSION`
 - Release history: `docs/CHANGELOG.md`
 - Runtime source of truth in containers: backend reads `/app/VERSION` by default.
+- Backend container dependencies are lockfile-pinned (`backend/package-lock.json`) and installed via `npm ci --omit=dev` for reproducible builds.
 - Optional override: set `APP_VERSION` only if you intentionally want to override `VERSION`.
 
 
@@ -51,10 +53,17 @@ Re-run safely at any time:
 - Place notification WAV files in `frontend/audio/` (served by the frontend container at `/audio/...`).
 - Current frontend alert lookup includes message and notification variants such as `message_received.wav` and `notification.wav`.
 
-## Security-related environment notes
-- `PUBLIC_BASE_URL` should match your externally reachable app URL.
-- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
+## Security-sensitive config
+- `JWT_SECRET` is required and backend startup now fails if it is missing, too short (<32 chars), or placeholder-like (for example `change-me` or `replace_with_long_random_secret`).
+- `PUBLIC_BASE_URL` and/or `CORS_ORIGINS` must resolve to valid trusted origins (for example `https://chat.example.com`).
+- In production/container-style deployments, backend startup fails closed when trusted origin config is empty or invalid.
 - `CORS_ORIGINS` should be a comma-separated allowlist of trusted frontend origins permitted to call the API with credentials.
+- Session cookies remain `httpOnly` + `sameSite=lax`; `secure` is enabled when `COOKIE_SECURE=true` and TLS is active at the edge (`X-Forwarded-Proto=https`).
+- WebSocket connections require a valid session cookie; channel events are scoped to explicit `subscribe` messages (`{"type":"subscribe","channelIds":[...]}`).
+- Message history APIs require explicit scope (`channelId` or `dmPeerId`), and `/api/messages/window/:id` returns only a bounded window up to the trigger message.
+- Upload downloads are access-checked against attached messages; orphaned uploads are denied by default.
+- `CADDY_SITE_ADDRESS` must be your DNS hostname only (no `https://` or path) for automatic HTTPS certificates and HTTP->HTTPS redirect.
+- Frontend ships with a system font stack (no Google Fonts request), and edge CSP/header policy is set in `caddy/Caddyfile`.
 - Authentication and recovery endpoints are rate-limited server-side; repeated failures receive HTTP `429` with `Retry-After`.
 
 ## Compose database host note
@@ -137,7 +146,8 @@ Set `BOT_PASSWORD` in your runtime compose environment (for example `.env` on th
 ### Edit system prompt
 Edit `bot/prompts/system.txt`.
 - The bot reads this file at runtime when generating replies.
-- No rebuild is required by default because compose points the bot to `/config/bot/prompts/system.txt` (repo-mounted read-only into the container). Restart the bot service after edits if needed.
+- No rebuild is required by default because compose mounts only `bot/prompts/` to `/config/bot/prompts/` for the bot container. Restart the bot service after edits if needed.
+- Bot container mounts are intentionally minimal (`bot/prompts/`, `.aibot.env`, `.ollama.env`) and do not include the full repo tree.
 
 ### Bot env vars
 Required:
@@ -150,11 +160,14 @@ Required:
 Optional:
 - `BOT_OLLAMA_TIMEOUT_MS` (default `30000`)
 - `BOT_MAX_REPLY_CHARS` (default `1800`)
-- `BOT_CONTEXT_MAX_MESSAGES` (default `30`)
+- `BOT_CONTEXT_MAX_MESSAGES` (default `10`)
 - `BOT_CONVO_TTL_MS` (default `900000`)
 - `BOT_RATE_LIMIT_MS` (default `2000`)
 - `BOT_MAX_CONCURRENCY_PER_CHANNEL` (default `1`)
 - `BOT_PROMPT_FILE` (default `/config/bot/prompts/system.txt`)
+- `BOT_ENABLE_DMS` (default `true`)
+- `BOT_ENABLE_CHANNELS` (default `true`)
+- `BOT_ALLOWED_CHANNEL_IDS` (optional comma-separated channel id allowlist)
 
 ### Manual verification checklist (acceptance)
 1. Start Grishcord + bot (`./scripts/grishcordctl.sh start`) and confirm bot logs show successful login and WebSocket connection.

@@ -59,8 +59,19 @@ require_bin() {
 
 safe_load_install_meta() {
   [[ -f "$INSTALL_META_FILE" ]] || return 0
-  # shellcheck disable=SC1090
-  source "$INSTALL_META_FILE"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in
+      INSTALL_METHOD|ARCHIVE_URL)
+        printf -v "$key" '%s' "$value"
+        ;;
+    esac
+  done < "$INSTALL_META_FILE"
 }
 
 ensure_docker_access() {

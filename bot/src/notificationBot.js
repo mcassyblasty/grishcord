@@ -100,7 +100,23 @@ export class NotificationBot {
     const mode = String(notification.mode || '');
     if (!['channel', 'dm'].includes(mode)) return;
 
+    if (mode === 'dm' && !this.config.enableDms) {
+      console.log('[aibot] ignoring notification: dm handling disabled by BOT_ENABLE_DMS=false');
+      return;
+    }
+
+    if (mode === 'channel' && !this.config.enableChannels) {
+      console.log('[aibot] ignoring notification: channel handling disabled by BOT_ENABLE_CHANNELS=false');
+      return;
+    }
+
     if (mode === 'channel') {
+      const notificationChannelId = Number(notification.channelId || 0);
+      const allowlist = Array.isArray(this.config.allowedChannelIds) ? this.config.allowedChannelIds : [];
+      if (allowlist.length && (!Number.isFinite(notificationChannelId) || !allowlist.includes(notificationChannelId))) {
+        console.log('[aibot] ignoring notification: channel not in BOT_ALLOWED_CHANNEL_IDS', notification.channelId || null);
+        return;
+      }
       const title = String(notification.title || '').toLowerCase();
       if (!title.includes('ping')) return;
     }
@@ -118,17 +134,45 @@ export class NotificationBot {
         const lastAt = this.lastReplyAtByConversation.get(conversationKey) || 0;
         if (nowMs() - lastAt < this.config.rateLimitMs) return;
 
-        const rows = await this.client.getDmMessages(dmPeerId);
+        const rows = await this.client.getDmWindow(messageId, dmPeerId, this.config.contextMaxMessages);
+        const triggerCount = rows.filter((r) => Number(r.id) === messageId).length;
+        if (triggerCount === 0) {
+          console.warn('[aibot] missing trigger in dm window', { dmPeerId, messageId });
+          return;
+        }
+        if (triggerCount > 1) {
+          console.warn('[aibot] duplicate trigger in dm window', { dmPeerId, messageId, triggerCount });
+          return;
+        }
         const trigger = rows.find((r) => Number(r.id) === messageId);
-        if (!trigger) return;
         if (Number(trigger.author_id) === this.botUserId) return;
 
-        const llmMessages = await this.#buildMessages(conversationKey, rows, trigger);
-        const raw = await this.ollama.generate(llmMessages);
+        const llmMessages = await this.#buildMessages(rows);
+        if (llmMessages.length <= 1) {
+          console.warn('[aibot] unexpected empty context for dm window', { dmPeerId, messageId });
+          return;
+        }
+        let raw;
+        try {
+          raw = await this.ollama.generate(llmMessages);
+        } catch (err) {
+          if (String(err?.message || '').toLowerCase().includes('timeout')) {
+            console.error('[aibot] llm timeout for dm reply', { dmPeerId, messageId, error: err.message });
+          }
+          throw err;
+        }
         const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
-        if (!safe) return;
+        if (!safe) {
+          console.warn('[aibot] empty model output for dm reply', { dmPeerId, messageId });
+          return;
+        }
 
-        await this.client.postDmReply(dmPeerId, messageId, safe);
+        try {
+          await this.client.postDmReply(dmPeerId, messageId, safe);
+        } catch (err) {
+          console.error('[aibot] dm reply post failed', { dmPeerId, messageId, error: err.message });
+          throw err;
+        }
         this.lastReplyAtByConversation.set(conversationKey, nowMs());
         this.#remember(conversationKey, { role: 'assistant', content: safe });
       });
@@ -137,48 +181,66 @@ export class NotificationBot {
 
     const channelId = Number(target?.channelId || notification.channelId || 0);
     if (!Number.isFinite(channelId) || channelId <= 0) return;
+    if (Array.isArray(this.config.allowedChannelIds) && this.config.allowedChannelIds.length && !this.config.allowedChannelIds.includes(channelId)) {
+      console.log('[aibot] ignoring notification: resolved channel not in BOT_ALLOWED_CHANNEL_IDS', channelId);
+      return;
+    }
     const conversationKey = `channel:${channelId}`;
 
     await this.queue.run(conversationKey, async () => {
       const lastAt = this.lastReplyAtByConversation.get(conversationKey) || 0;
       if (nowMs() - lastAt < this.config.rateLimitMs) return;
 
-      const rows = await this.client.getChannelMessages(channelId);
+      const rows = await this.client.getChannelWindow(messageId, channelId, this.config.contextMaxMessages);
+      const triggerCount = rows.filter((r) => Number(r.id) === messageId).length;
+      if (triggerCount === 0) {
+        console.warn('[aibot] missing trigger in channel window', { channelId, messageId });
+        return;
+      }
+      if (triggerCount > 1) {
+        console.warn('[aibot] duplicate trigger in channel window', { channelId, messageId, triggerCount });
+        return;
+      }
       const trigger = rows.find((r) => Number(r.id) === messageId);
-      if (!trigger) return;
       if (Number(trigger.author_id) === this.botUserId) return;
 
-      const llmMessages = await this.#buildMessages(conversationKey, rows, trigger);
-      const raw = await this.ollama.generate(llmMessages);
+      const llmMessages = await this.#buildMessages(rows);
+      if (llmMessages.length <= 1) {
+        console.warn('[aibot] unexpected empty context for channel window', { channelId, messageId });
+        return;
+      }
+      let raw;
+      try {
+        raw = await this.ollama.generate(llmMessages);
+      } catch (err) {
+        if (String(err?.message || '').toLowerCase().includes('timeout')) {
+          console.error('[aibot] llm timeout for channel reply', { channelId, messageId, error: err.message });
+        }
+        throw err;
+      }
       const safe = sanitizeOutbound(raw).slice(0, this.config.maxReplyChars);
-      if (!safe) return;
+      if (!safe) {
+        console.warn('[aibot] empty model output for channel reply', { channelId, messageId });
+        return;
+      }
 
-      await this.client.postReply(channelId, messageId, safe);
+      try {
+        await this.client.postReply(channelId, messageId, safe);
+      } catch (err) {
+        console.error('[aibot] channel reply post failed', { channelId, messageId, error: err.message });
+        throw err;
+      }
       this.lastReplyAtByConversation.set(conversationKey, nowMs());
       this.#remember(conversationKey, { role: 'assistant', content: safe });
     });
   }
 
-  async #buildMessages(conversationKey, rows, trigger) {
+  async #buildMessages(rows) {
     const systemPrompt = fs.readFileSync(this.config.promptFile, 'utf8');
-    const cache = this.contextByConversation.get(conversationKey);
-    const expired = !cache || nowMs() - cache.lastTouchedAt > this.config.convoTtlMs;
-
-    let turns = [];
-    if (!expired && Array.isArray(cache.turns)) {
-      turns = cache.turns.slice(-this.config.contextMaxMessages);
-    } else {
-      turns = rows.slice(-this.config.contextMaxMessages).map((r) => toLlmMessage(r, this.botUserId));
-    }
-
-    const promptMessages = [
-      { role: 'system', content: systemPrompt },
-      ...turns,
-      { role: 'user', content: `${trigger.display_name || trigger.username || 'user'}: ${String(trigger.body || '')}` }
-    ];
-
-    this.#remember(conversationKey, promptMessages.filter((m) => m.role !== 'system').slice(-this.config.contextMaxMessages));
-    return promptMessages;
+    const turns = rows
+      .slice(-this.config.contextMaxMessages)
+      .map((r) => toLlmMessage(r, this.botUserId));
+    return [{ role: 'system', content: systemPrompt }, ...turns];
   }
 
   #remember(conversationKey, newTurnOrTurns) {

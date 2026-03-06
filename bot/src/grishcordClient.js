@@ -36,13 +36,12 @@ export class GrishcordClient {
     return this.#request(`/api/messages/${Number(messageId)}`);
   }
 
-  async getChannelMessages(channelId) {
-    return this.#request(`/api/messages/since/0?channelId=${Number(channelId)}`);
+  async getChannelWindow(triggerId, channelId, limit) {
+    return this.#request(`/api/messages/window/${Number(triggerId)}?channelId=${Number(channelId)}&limit=${Number(limit)}`);
   }
 
-
-  async getDmMessages(dmPeerId) {
-    return this.#request(`/api/messages/since/0?dmPeerId=${Number(dmPeerId)}`);
+  async getDmWindow(triggerId, dmPeerId, limit) {
+    return this.#request(`/api/messages/window/${Number(triggerId)}?dmPeerId=${Number(dmPeerId)}&limit=${Number(limit)}`);
   }
 
   async postDmReply(dmPeerId, replyToId, body) {
