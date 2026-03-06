@@ -1009,6 +1009,9 @@ app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) =>
   for (const r of rows) {
     r.uploads = byId.get(Number(r.id)) || [];
   }
+
+  const hasTrigger = rows.some((r) => Number(r.id) === triggerId);
+  if (!hasTrigger) return res.status(404).json({ error: 'not_found' });
   res.json(rows);
 });
 
