@@ -72,21 +72,6 @@ validate_downloaded_archive() {
   return 1
 }
 
-
-ensure_archive_target_safe() {
-  local target="$1"
-  [[ -d "$target" ]] || mkdir -p "$target"
-  if is_repo_dir "$target"; then
-    return 0
-  fi
-  # Refuse overlaying archive contents into unrelated non-empty directories.
-  if [[ -n "$(find "$target" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
-    err "Archive install target is non-empty and not a valid Grishcord repo: $target"
-    err "Choose an empty directory (or use a valid Grishcord repo directory)."
-    exit 1
-  fi
-}
-
 extract_archive_flattened() {
   local source="$1" target="$2"
   local tmp_dir src_root
@@ -132,7 +117,6 @@ provision_repo_checkout() {
     local-archive)
       source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcord.tar.gz")"
       [[ -f "$source" ]] || { err "archive file not found: $source"; exit 1; }
-      ensure_archive_target_safe "$target"
       extract_archive_flattened "$source" "$target"
       ;;
     git)
@@ -163,7 +147,6 @@ provision_repo_checkout() {
         rm -f "$source"
         exit 1
       fi
-      ensure_archive_target_safe "$target"
       extract_archive_flattened "$source" "$target"
       rm -f "$source"
       ;;
@@ -286,11 +269,8 @@ configure_env_wizard() {
   admin_password="$(prompt_secret 'Admin password')"
   [[ -n "${admin_password// }" ]] || { err "Admin password cannot be blank."; exit 1; }
 
-  postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current, or type auto to generate securely)')"
-  if [[ "$(printf '%s' "$postgres_password" | tr '[:upper:]' '[:lower:]')" == "auto" ]]; then
-    postgres_password="$(generate_secure_hex 32)"
-    log "Generated secure POSTGRES_PASSWORD"
-  elif [[ -z "${postgres_password// }" ]]; then
+  postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current or auto-generate)')"
+  if [[ -z "${postgres_password// }" ]]; then
     if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
       postgres_password="$current_db_pass"
       log "Keeping existing POSTGRES_PASSWORD from .env"
@@ -544,7 +524,7 @@ configure_ai() {
 
   log "AI setup selected: this will install/configure Ollama and set up GrishBot for Dockerized access."
   log "Configuring Ollama in docker mode so the bot can reach it via host.docker.internal:11434."
-  "$APP_DIR/scripts/aibotctl.sh" ollama install --bind-mode docker
+  "$APP_DIR/scripts/ollamactrl.sh" install --bind-mode docker
 
   BOT_USERNAME="$(prompt 'Bot username' "${BOT_USERNAME:-grishbot}")"
   BOT_DISPLAY_NAME="$(prompt 'Bot display name' "${BOT_DISPLAY_NAME:-Grish Bot}")"

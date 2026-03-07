@@ -454,14 +454,12 @@ main() {
 
   ensure_docker_access
   require_bin curl
-  if [[ "$cmd" != "stop" && "$cmd" != "logs" ]]; then
-    infer_and_export_caddy_site_from_public_base
-    if [[ "$cmd" == "start" || "$cmd" == "restart" || "$cmd" == "update-start" ]]; then
-      ensure_compose_env_file
-    fi
-    validate_https_env
-    validate_jwt_secret_env
+  infer_and_export_caddy_site_from_public_base
+  if [[ "$cmd" == "start" || "$cmd" == "restart" || "$cmd" == "update-start" ]]; then
+    ensure_compose_env_file
   fi
+  validate_https_env
+  validate_jwt_secret_env
 
   case "$cmd" in
     start) start_stack ;;
