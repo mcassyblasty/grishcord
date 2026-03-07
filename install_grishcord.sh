@@ -5,7 +5,33 @@ APP_DIR=""
 ENV_FILE=""
 INSTALL_ENV_FILE=""
 COOKIE_JAR="$(mktemp /tmp/grishcord-install-cookie.XXXXXX)"
+AI_SETUP_STATUS="not_selected"
 trap 'rm -f "$COOKIE_JAR"' EXIT
+
+sanitize_env_value() {
+  local v="$1"
+  v="${v//$'\r'/ }"
+  v="${v//$'\n'/ }"
+  printf '%s' "$v" | tr -d '\000-\010\013\014\016-\037\177'
+}
+
+load_data_env_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in
+      ROOT_ADMIN_USERNAME|ROOT_ADMIN_DISPLAY_NAME|EXISTING_ADMIN_DB|ENABLE_AI|BOT_USERNAME|BOT_DISPLAY_NAME|BOT_COLOR)
+        printf -v "$key" '%s' "$(sanitize_env_value "$value")"
+        ;;
+    esac
+  done < "$file"
+}
 
 log(){ printf '[installGrishcord] %s\n' "$*"; }
 warn(){ printf '[installGrishcord][warn] %s\n' "$*" >&2; }
@@ -31,8 +57,63 @@ is_repo_dir() {
   [[ -n "$d" && -f "$d/docker-compose.yml" && -d "$d/backend" && -d "$d/scripts" ]]
 }
 
+validate_downloaded_archive() {
+  local archive_path="$1" archive_url="$2"
+  if tar -tzf "$archive_path" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  err "Downloaded file is not a valid .tar.gz archive: $archive_url"
+  err "For git mode, use: https://github.com/mcassyblasty/grishcord.git"
+  err "For archive mode, use: https://github.com/mcassyblasty/grishcord/archive/refs/heads/main.tar.gz"
+  if [[ "$archive_url" =~ ^https?://github\.com/[^/]+/[^/]+/?$ ]]; then
+    warn "It looks like a GitHub repo page URL, not a release/archive tarball URL."
+  fi
+  return 1
+}
+
+
+ensure_archive_target_safe() {
+  local target="$1"
+  [[ -d "$target" ]] || mkdir -p "$target"
+  if is_repo_dir "$target"; then
+    return 0
+  fi
+  # Refuse overlaying archive contents into unrelated non-empty directories.
+  if [[ -n "$(find "$target" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+    err "Archive install target is non-empty and not a valid Grishcord repo: $target"
+    err "Choose an empty directory (or use a valid Grishcord repo directory)."
+    exit 1
+  fi
+}
+
+extract_archive_flattened() {
+  local source="$1" target="$2"
+  local tmp_dir src_root
+  tmp_dir="$(mktemp -d /tmp/grishcord-src.XXXXXX)"
+  if [[ "$source" == *.zip ]]; then
+    require_bin unzip
+    unzip -oq "$source" -d "$tmp_dir"
+  else
+    require_bin tar
+    tar -xzf "$source" -C "$tmp_dir"
+  fi
+
+  # GitHub archives wrap repo contents in a top-level directory (e.g. grishcord-main); flatten into target.
+  local entries=("$tmp_dir"/*)
+  if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
+    src_root="${entries[0]}"
+  else
+    src_root="$tmp_dir"
+  fi
+
+  mkdir -p "$target"
+  cp -a "$src_root"/. "$target"/
+  rm -rf "$tmp_dir"
+}
+
 provision_repo_checkout() {
-  local default_target="${HOME:-$PWD}/grishcord"
+  local default_target="$PWD/grishcord"
   local target source_mode source archive_url
 
   warn "Grishcord repo root was not found automatically."
@@ -46,22 +127,17 @@ provision_repo_checkout() {
     return 0
   fi
 
-  source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'local-archive')"
+  source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'curl')"
   case "$source_mode" in
     local-archive)
-      source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcordgood.zip")"
+      source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcord.tar.gz")"
       [[ -f "$source" ]] || { err "archive file not found: $source"; exit 1; }
-      if [[ "$source" == *.zip ]]; then
-        require_bin unzip
-        unzip -oq "$source" -d "$target"
-      else
-        require_bin tar
-        tar -xzf "$source" -C "$target"
-      fi
+      ensure_archive_target_safe "$target"
+      extract_archive_flattened "$source" "$target"
       ;;
     git)
       require_bin git
-      source="$(prompt 'Grishcord git URL' 'https://github.com/example/grishcord.git')"
+      source="$(prompt 'Grishcord git URL' 'https://github.com/mcassyblasty/grishcord.git')"
       if [[ -d "$target/.git" ]]; then
         git -C "$target" pull --ff-only
       else
@@ -74,7 +150,7 @@ provision_repo_checkout() {
       ;;
     wget|curl)
       require_bin tar
-      archive_url="$(prompt 'Grishcord archive URL (.tar.gz)' 'https://github.com/example/grishcord/archive/refs/heads/main.tar.gz')"
+      archive_url="$(prompt 'Grishcord archive URL (.tar.gz)' 'https://github.com/mcassyblasty/grishcord/archive/refs/heads/main.tar.gz')"
       source="$(mktemp /tmp/grishcord-src.XXXXXX.tar.gz)"
       if [[ "$source_mode" == "wget" ]]; then
         require_bin wget
@@ -83,7 +159,12 @@ provision_repo_checkout() {
         require_bin curl
         curl -fL --retry 3 --connect-timeout 10 -o "$source" "$archive_url"
       fi
-      tar -xzf "$source" -C "$target"
+      if ! validate_downloaded_archive "$source" "$archive_url"; then
+        rm -f "$source"
+        exit 1
+      fi
+      ensure_archive_target_safe "$target"
+      extract_archive_flattened "$source" "$target"
       rm -f "$source"
       ;;
     *) err "invalid repo source: $source_mode"; exit 1 ;;
@@ -123,7 +204,7 @@ resolve_app_dir() {
   provision_repo_checkout
 }
 
-load_install_env(){ [[ -f "$INSTALL_ENV_FILE" ]] && source "$INSTALL_ENV_FILE" || true; }
+load_install_env(){ load_data_env_file "$INSTALL_ENV_FILE"; }
 
 ensure_env_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -139,14 +220,108 @@ get_env_key() {
 
 set_env_key() {
   local key="$1"; local value="$2"
-  if grep -qE "^${key}=" "$ENV_FILE"; then
-    sed -i "s#^${key}=.*#${key}=${value//#/\\#}#" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  fi
+  local safe_value tmp_file
+  safe_value="$(sanitize_env_value "$value")"
+  tmp_file="$(mktemp /tmp/grishcord-env.XXXXXX)"
+  awk -F= -v k="$key" -v v="$safe_value" '
+    BEGIN { replaced = 0 }
+    $1 == k { print k "=" v; replaced = 1; next }
+    { print }
+    END { if (!replaced) print k "=" v }
+  ' "$ENV_FILE" > "$tmp_file"
+  mv "$tmp_file" "$ENV_FILE"
 
 }
 
+
+is_placeholder_like() {
+  local raw compact
+  raw="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  compact="${raw//[_-]/}"
+  [[ -z "$raw" ]] && return 0
+  [[ "$raw" == "change_me" || "$raw" == "change-me" || "$raw" == "changeme" || "$raw" == "replace_with_long_random_secret" || "$raw" == "replacewithlongrandomsecret" || "$raw" == "jwtsecret" || "$raw" == "yourjwtsecret" || "$raw" == "password" ]] && return 0
+  [[ "$compact" == *"changeme"* || "$compact" == *"replacewith"* ]]
+}
+
+generate_secure_hex() {
+  local bytes="${1:-32}"
+  require_bin openssl
+  openssl rand -hex "$bytes"
+}
+
+normalize_hostname() {
+  local h
+  h="$(sanitize_env_value "${1:-}")"
+  h="${h#http://}"
+  h="${h#https://}"
+  h="${h%%/*}"
+  h="${h%%:*}"
+  printf '%s' "$h"
+}
+
+configure_env_wizard() {
+  local current_site current_base current_admin current_display current_db_pass current_jwt
+  local site_input site_host admin_username admin_display admin_password postgres_password db_user db_name
+
+  current_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
+  current_base="$(get_env_key PUBLIC_BASE_URL || true)"
+  current_admin="$(get_env_key ADMIN_USERNAME || true)"
+  current_display="${ROOT_ADMIN_DISPLAY_NAME:-${current_admin:-Root Admin}}"
+  current_db_pass="$(get_env_key POSTGRES_PASSWORD || true)"
+  current_jwt="$(get_env_key JWT_SECRET || true)"
+
+  if [[ -z "${current_site// }" && -n "${current_base// }" ]]; then
+    current_site="$(normalize_hostname "$current_base")"
+  fi
+
+  site_input="$(prompt 'Public hostname (no scheme/path)' "${current_site:-}")"
+  site_host="$(normalize_hostname "$site_input")"
+  if [[ -z "${site_host// }" ]]; then
+    err "Public hostname is required to configure CADDY_SITE_ADDRESS/PUBLIC_BASE_URL/CORS_ORIGINS."
+    exit 1
+  fi
+
+  admin_username="$(prompt 'Admin username' "${ROOT_ADMIN_USERNAME:-${current_admin:-rootadmin}}")"
+  admin_display="$(prompt 'Admin display name' "$current_display")"
+  admin_password="$(prompt_secret 'Admin password')"
+  [[ -n "${admin_password// }" ]] || { err "Admin password cannot be blank."; exit 1; }
+
+  postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current, or type auto to generate securely)')"
+  if [[ "$(printf '%s' "$postgres_password" | tr '[:upper:]' '[:lower:]')" == "auto" ]]; then
+    postgres_password="$(generate_secure_hex 32)"
+    log "Generated secure POSTGRES_PASSWORD"
+  elif [[ -z "${postgres_password// }" ]]; then
+    if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
+      postgres_password="$current_db_pass"
+      log "Keeping existing POSTGRES_PASSWORD from .env"
+    else
+      postgres_password="$(generate_secure_hex 32)"
+      log "Generated secure POSTGRES_PASSWORD"
+    fi
+  fi
+
+  if [[ -z "${current_jwt// }" ]] || is_placeholder_like "$current_jwt" || [[ ${#current_jwt} -lt 32 ]]; then
+    current_jwt="$(generate_secure_hex 32)"
+    log "Generated secure JWT_SECRET"
+  fi
+
+  db_user="$(get_env_key POSTGRES_USER || true)"
+  db_name="$(get_env_key POSTGRES_DB || true)"
+  db_user="${db_user:-grishcord}"
+  db_name="${db_name:-grishcord}"
+
+  set_env_key POSTGRES_PASSWORD "$postgres_password"
+  set_env_key DATABASE_URL "postgres://${db_user}:${postgres_password}@postgres:5432/${db_name}"
+  set_env_key JWT_SECRET "$current_jwt"
+  set_env_key ADMIN_USERNAME "$admin_username"
+  set_env_key PUBLIC_BASE_URL "https://${site_host}"
+  set_env_key CORS_ORIGINS "https://${site_host}"
+  set_env_key CADDY_SITE_ADDRESS "$site_host"
+
+  ROOT_ADMIN_USERNAME="$admin_username"
+  ROOT_ADMIN_DISPLAY_NAME="$admin_display"
+  ROOT_ADMIN_PASSWORD="$admin_password"
+}
 
 validate_required_env() {
   local caddy_site
@@ -202,15 +377,15 @@ preflight_compose_sanity() {
 }
 
 write_install_env() {
-  cat > "$INSTALL_ENV_FILE" <<ENV
-ROOT_ADMIN_USERNAME=$ROOT_ADMIN_USERNAME
-ROOT_ADMIN_DISPLAY_NAME=$ROOT_ADMIN_DISPLAY_NAME
-EXISTING_ADMIN_DB=$EXISTING_ADMIN_DB
-ENABLE_AI=$ENABLE_AI
-BOT_USERNAME=${BOT_USERNAME:-}
-BOT_DISPLAY_NAME=${BOT_DISPLAY_NAME:-}
-BOT_COLOR=${BOT_COLOR:-}
-ENV
+  {
+    printf 'ROOT_ADMIN_USERNAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_USERNAME")"
+    printf 'ROOT_ADMIN_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_DISPLAY_NAME")"
+    printf 'EXISTING_ADMIN_DB=%s\n' "$(sanitize_env_value "$EXISTING_ADMIN_DB")"
+    printf 'ENABLE_AI=%s\n' "$(sanitize_env_value "$ENABLE_AI")"
+    printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "${BOT_USERNAME:-}")"
+    printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "${BOT_DISPLAY_NAME:-}")"
+    printf 'BOT_COLOR=%s\n' "$(sanitize_env_value "${BOT_COLOR:-}")"
+  } > "$INSTALL_ENV_FILE"
   chmod 600 "$INSTALL_ENV_FILE" 2>/dev/null || true
 }
 
@@ -221,6 +396,12 @@ wait_http_ok() {
     sleep 2
   done
   return 1
+}
+
+print_startup_diagnostics() {
+  err "Service startup diagnostics (compose ps + recent backend/caddy logs):"
+  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" ps || true
+  docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" logs --no-color --tail 80 backend caddy || true
 }
 
 json_field() {
@@ -234,20 +415,24 @@ bootstrap_root_admin() {
 
   local payload
   payload=$(printf '{"username":"%s","displayName":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_DISPLAY_NAME" "$ROOT_ADMIN_PASSWORD")
-  local status
-  status=$(curl -sS -o /tmp/grish_bootstrap.json -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
+  local status resp
+  resp="$(mktemp /tmp/grish-bootstrap.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
 
   if [[ "$status" == "200" ]]; then
+    rm -f "$resp"
     log "Root admin created successfully."
     return 0
   fi
 
   if [[ "$status" == "409" ]]; then
+    rm -f "$resp"
     log "Root admin bootstrap already initialized; continuing with login verification."
     return 0
   fi
 
-  err "root bootstrap failed (HTTP $status): $(cat /tmp/grish_bootstrap.json 2>/dev/null || true)"
+  rm -f "$resp"
+  err "root bootstrap failed (HTTP $status)"
   exit 1
 }
 
@@ -255,32 +440,41 @@ login_admin() {
   local base_url="$1"
   local payload
   payload=$(printf '{"username":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD")
-  local status
-  status=$(curl -sS -o /tmp/grish_login.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
-  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status): $(cat /tmp/grish_login.json 2>/dev/null || true)"; exit 1; }
+  local status resp
+  resp="$(mktemp /tmp/grish-login.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/login" -d "$payload" || true)
+  rm -f "$resp"
+  [[ "$status" == "200" ]] || { err "admin login failed (HTTP $status)"; exit 1; }
 }
 
 create_invite_key() {
   local base_url="$1"
-  local status
-  status=$(curl -sS -o /tmp/grish_invite.json -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/admin/invites" -d '{}' || true)
-  [[ "$status" == "200" ]] || { err "invite creation failed (HTTP $status): $(cat /tmp/grish_invite.json 2>/dev/null || true)"; exit 1; }
-  cat /tmp/grish_invite.json | json_field inviteKey
+  local status resp
+  resp="$(mktemp /tmp/grish-invite.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -c "$COOKIE_JAR" -b "$COOKIE_JAR" -H 'content-type: application/json' -X POST "$base_url/api/admin/invites" -d '{}' || true)
+  [[ "$status" == "200" ]] || { rm -f "$resp"; err "invite creation failed (HTTP $status)"; exit 1; }
+  local invite
+  invite="$(json_field inviteKey < "$resp")"
+  rm -f "$resp"
+  printf '%s' "$invite"
 }
 
 register_user_with_invite() {
   local base_url="$1" invite="$2" username="$3" display="$4" password="$5"
-  local payload status
+  local payload status resp
   payload=$(printf '{"inviteToken":"%s","username":"%s","displayName":"%s","password":"%s"}' "$invite" "$username" "$display" "$password")
-  status=$(curl -sS -o /tmp/grish_register.json -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/register" -d "$payload" || true)
+  resp="$(mktemp /tmp/grish-register.XXXXXX.json)"
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/register" -d "$payload" || true)
   [[ "$status" == "200" ]] || {
-    if grep -q 'invalid_invite' /tmp/grish_register.json 2>/dev/null; then
+    if grep -q 'invalid_invite' "$resp" 2>/dev/null; then
       err "registration failed due to invalid invite"
     else
-      warn "user registration returned HTTP $status: $(cat /tmp/grish_register.json 2>/dev/null || true)"
+      warn "user registration returned HTTP $status"
     fi
+    rm -f "$resp"
     return 1
   }
+  rm -f "$resp"
   return 0
 }
 
@@ -324,13 +518,13 @@ write_aibot_env() {
     model="$(awk -F= '/^OLLAMA_MODEL=/{print substr($0,index($0,"=")+1)}' "$APP_DIR/.ollama.env" | tail -n1)"
   fi
   model="${model:-gemma3:4b}"
-  cat > "$APP_DIR/.aibot.env" <<ENV
-BOT_USERNAME=$BOT_USERNAME
-BOT_DISPLAY_NAME=$BOT_DISPLAY_NAME
-BOT_COLOR=$BOT_COLOR
-OLLAMA_MODEL=$model
-BOT_CONVO_TTL_MS=900000
-ENV
+  {
+    printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "$BOT_USERNAME")"
+    printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$BOT_DISPLAY_NAME")"
+    printf 'BOT_COLOR=%s\n' "$(sanitize_env_value "$BOT_COLOR")"
+    printf 'OLLAMA_MODEL=%s\n' "$(sanitize_env_value "$model")"
+    printf 'BOT_CONVO_TTL_MS=900000\n'
+  } > "$APP_DIR/.aibot.env"
   chmod 600 "$APP_DIR/.aibot.env" 2>/dev/null || true
   set_env_key OLLAMA_MODEL "$model"
 }
@@ -341,17 +535,22 @@ configure_ai() {
   ans="${ans:-N}"
   if [[ ! "$ans" =~ ^[Yy]$ ]]; then
     ENABLE_AI="false"
+    AI_SETUP_STATUS="skipped"
     docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" stop bot >/dev/null 2>&1 || true
     return 0
   fi
   ENABLE_AI="true"
+  AI_SETUP_STATUS="in_progress"
 
-  "$APP_DIR/scripts/ollamactrl.sh" install
+  log "AI setup selected: this will install/configure Ollama and set up GrishBot for Dockerized access."
+  log "Configuring Ollama in docker mode so the bot can reach it via host.docker.internal:11434."
+  "$APP_DIR/scripts/aibotctl.sh" ollama install --bind-mode docker
 
   BOT_USERNAME="$(prompt 'Bot username' "${BOT_USERNAME:-grishbot}")"
   BOT_DISPLAY_NAME="$(prompt 'Bot display name' "${BOT_DISPLAY_NAME:-Grish Bot}")"
   BOT_COLOR="$(prompt 'Bot color (#RRGGBB)' "${BOT_COLOR:-#7A5CFF}")"
   BOT_PASSWORD="$(prompt_secret 'Bot password')"
+  [[ -n "${BOT_PASSWORD// }" ]] || { err "Bot password cannot be blank when AI is enabled."; exit 1; }
 
   login_admin "$base_url"
   invite_key="$(create_invite_key "$base_url")"
@@ -372,8 +571,10 @@ configure_ai() {
 
   docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build bot
   if ! docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" exec -T bot sh -lc 'wget -qO- "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1 || curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null'; then
+    AI_SETUP_STATUS="completed_with_ollama_warning"
     warn "Bot container cannot reach Ollama yet. Check host firewall rules for docker subnet -> tcp/11434."
   else
+    AI_SETUP_STATUS="completed"
     log "Bot container connectivity to Ollama verified."
   fi
 }
@@ -386,44 +587,31 @@ main() {
 
   load_install_env
   ensure_env_file
+  configure_env_wizard
 
-  local current_admin_env
-  current_admin_env="$(get_env_key ADMIN_USERNAME || true)"
   EXISTING_ADMIN_DB="$(prompt 'Is there already an admin account in the existing DB? (y/N)' "${EXISTING_ADMIN_DB:-N}")"
-
-  if [[ "$EXISTING_ADMIN_DB" =~ ^[Yy]$ ]]; then
-    ROOT_ADMIN_USERNAME="$(prompt 'Existing admin username' "${ROOT_ADMIN_USERNAME:-${current_admin_env:-rootadmin}}")"
-    ROOT_ADMIN_DISPLAY_NAME="${ROOT_ADMIN_DISPLAY_NAME:-$ROOT_ADMIN_USERNAME}"
-    ROOT_ADMIN_PASSWORD="$(prompt_secret 'Existing admin password')"
-    if [[ -z "$current_admin_env" ]]; then
-      set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
-      warn "ADMIN_USERNAME was not set in .env; initialized to $ROOT_ADMIN_USERNAME"
-    fi
-  else
-    ROOT_ADMIN_USERNAME="$(prompt 'Root admin username' "${ROOT_ADMIN_USERNAME:-${current_admin_env:-rootadmin}}")"
-    ROOT_ADMIN_DISPLAY_NAME="$(prompt 'Root admin display name' "${ROOT_ADMIN_DISPLAY_NAME:-Root Admin}")"
-    ROOT_ADMIN_PASSWORD="$(prompt_secret 'Root admin password')"
-    set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
-  fi
 
   preflight_compose_sanity
 
   log "Starting/upgrading core compose services"
   docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans postgres backend frontend caddy
 
-  if ! wait_http_ok "http://127.0.0.1:3000/health" 80; then
-    err "Backend health check failed at http://127.0.0.1:3000/health"
+  local local_api_base="http://127.0.0.1"
+  if ! wait_http_ok "$local_api_base/api/version" 80; then
+    err "App readiness probe failed at $local_api_base/api/version"
+    err "Caddy is the host-facing entrypoint; ensure caddy/backend/frontend containers are healthy."
+    print_startup_diagnostics
     exit 1
   fi
 
   if [[ "$EXISTING_ADMIN_DB" =~ ^[Yy]$ ]]; then
     log "Skipping root bootstrap because existing DB admin was selected."
   else
-    bootstrap_root_admin "http://127.0.0.1:3000"
+    bootstrap_root_admin "$local_api_base"
   fi
-  login_admin "http://127.0.0.1:3000"
+  login_admin "$local_api_base"
 
-  configure_ai "http://127.0.0.1:3000"
+  configure_ai "$local_api_base"
 
   write_install_env
 
@@ -431,9 +619,10 @@ main() {
 
 Install complete.
 - Backend health: OK
-- Root admin username: $ROOT_ADMIN_USERNAME (protected by ADMIN_USERNAME server-side checks)
+- Admin username: $ROOT_ADMIN_USERNAME (protected by ADMIN_USERNAME server-side checks)
 - Existing admin DB mode: $EXISTING_ADMIN_DB
 - AI enabled: $ENABLE_AI
+- GrishBot setup status: $AI_SETUP_STATUS
 
 Next steps:
 1) Open your Grishcord URL and log in as root admin.

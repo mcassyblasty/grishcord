@@ -1,4 +1,8 @@
-.PHONY: test
+.PHONY: test install-sanity
 
 test:
-	./scripts/test_install_smoke.sh
+	cd backend && npm test
+
+
+install-sanity:
+	./tests/install_sanity_check.sh

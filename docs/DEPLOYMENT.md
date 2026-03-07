@@ -11,6 +11,10 @@ From repository root:
 ```
 This command starts the stack using deterministic compose naming (`-p grishcord`) with verbose progress and readiness timers. Ensure Docker/Compose and `/mnt/grishcord` are already set up.
 
+## Control scripts
+- `./scripts/grishcordctl.sh`: start/stop/restart/update-start/status/logs/doctor for the app stack.
+- `./scripts/aibotctl.sh`: Ollama runtime management (`ollama install|update|start|stop`) and bot config/lifecycle (`bot install|config|show|restart`).
+
 ## Normal start
 ```bash
 ./scripts/grishcordctl.sh start

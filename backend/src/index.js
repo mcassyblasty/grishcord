@@ -48,7 +48,7 @@ const uploadsDir = process.env.UPLOADS_DIR || '/mnt/grishcord/uploads';
 await fsp.mkdir(uploadsDir, { recursive: true });
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'mcassyblasty';
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
+const JWT_SECRET = String(process.env.JWT_SECRET || '').trim();
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 100 * 1024 * 1024);
 const RETENTION_THRESHOLD = Number(process.env.RETENTION_THRESHOLD_PCT || 90);
 const RETENTION_INTERVAL_MS = Number(process.env.RETENTION_INTERVAL_MS || 120000);
@@ -94,18 +94,117 @@ function normalizeOrigin(raw) {
   }
 }
 
-const corsAllowedOrigins = (() => {
-  const list = String(process.env.CORS_ORIGINS || '').split(',').map((v) => normalizeOrigin(v)).filter(Boolean);
-  const fromPublicBase = normalizeOrigin(process.env.PUBLIC_BASE_URL || '');
-  if (fromPublicBase) list.push(fromPublicBase);
-  return [...new Set(list)];
-})();
+function isPlaceholderSecret(secret) {
+  const normalized = String(secret || '').trim().toLowerCase();
+  if (!normalized) return true;
+  const compact = normalized.replace(/[\s_]/g, '');
+  return [
+    'change-me',
+    'changeme',
+    'replace_with_long_random_secret',
+    'replacewithlongrandomsecret',
+    'jwtsecret',
+    'yourjwtsecret'
+  ].includes(normalized) || compact.includes('replacewith') || compact.includes('changeme');
+}
+
+function validateJwtSecretOrExit(secret) {
+  if (!secret || secret.length < 32 || isPlaceholderSecret(secret)) {
+    console.error('[startup][error] Invalid JWT_SECRET.');
+    console.error('[startup][error] Set JWT_SECRET to a non-placeholder random secret with at least 32 characters.');
+    process.exit(1);
+  }
+}
+
+function parseTrustedOriginsConfig() {
+  const rawCors = String(process.env.CORS_ORIGINS || '').trim();
+  const rawPublicBase = String(process.env.PUBLIC_BASE_URL || '').trim();
+  const invalid = [];
+  const origins = [];
+
+  if (rawCors) {
+    for (const part of rawCors.split(',')) {
+      const token = String(part || '').trim();
+      if (!token) continue;
+      const normalized = normalizeOrigin(token);
+      if (!normalized) invalid.push(`CORS_ORIGINS entry: ${token}`);
+      else origins.push(normalized);
+    }
+  }
+
+  if (rawPublicBase) {
+    const normalizedBase = normalizeOrigin(rawPublicBase);
+    if (!normalizedBase) invalid.push(`PUBLIC_BASE_URL: ${rawPublicBase}`);
+    else origins.push(normalizedBase);
+  }
+
+  return { origins: [...new Set(origins)], invalid };
+}
+
+function validateTrustedOriginsOrExit(config) {
+  if (config.invalid.length) {
+    console.error('[startup][error] Invalid trusted origin configuration.');
+    for (const msg of config.invalid) console.error(`[startup][error] ${msg}`);
+    console.error('[startup][error] Use full origins like https://chat.example.com in PUBLIC_BASE_URL and CORS_ORIGINS.');
+    process.exit(1);
+  }
+
+  const productionStyle = process.env.NODE_ENV === 'production' || runningInContainer();
+  if (productionStyle && !config.origins.length) {
+    console.error('[startup][error] Trusted origins are required in production/container deployments.');
+    console.error('[startup][error] Set PUBLIC_BASE_URL and/or CORS_ORIGINS to your HTTPS frontend origin(s).');
+    process.exit(1);
+  }
+}
+
+validateJwtSecretOrExit(JWT_SECRET);
+
+const trustedOriginsConfig = parseTrustedOriginsConfig();
+validateTrustedOriginsOrExit(trustedOriginsConfig);
+
+const corsAllowedOrigins = trustedOriginsConfig.origins;
 
 const corsOriginValidator = (origin, cb) => {
   if (!origin) return cb(null, true);
-  if (!corsAllowedOrigins.length) return cb(null, true);
   return cb(null, corsAllowedOrigins.includes(origin));
 };
+
+function isTrustedBrowserOrigin(origin) {
+  if (!origin) return true;
+  return corsAllowedOrigins.includes(normalizeOrigin(origin));
+}
+
+function canUserReadDm(userId, dmPeerId) {
+  // DM scope boundary: valid DM reads require an authenticated user and explicit peer scope.
+  const uid = Number(userId || 0);
+  const peer = Number(dmPeerId || 0);
+  return uid > 0 && peer > 0;
+}
+
+function canUserReadDmMessage(userId, authorId, dmPeerId) {
+  // DM message privacy boundary: only sender/peer participants may read this message.
+  const uid = Number(userId || 0);
+  if (!uid) return false;
+  return uid === Number(authorId) || uid === Number(dmPeerId);
+}
+
+function canUserReadChannel(userId, channelId) {
+  // Current product model: channels are readable to authenticated users.
+  // Future private-channel ACL checks should be added here.
+  const uid = Number(userId || 0);
+  if (!uid) return false;
+  return Number.isFinite(Number(channelId)) && Number(channelId) > 0;
+}
+
+function wsCanReceiveChannelEvent(ws, channelId) {
+  if (!ws?.subscribedChannelIds) return false;
+  if (!canUserReadChannel(ws?.userId, channelId)) return false;
+  return ws.subscribedChannelIds.has(Number(channelId));
+}
+
+function wsCanReceiveDmEvent(ws, authorId, dmPeerId) {
+  return canUserReadDmMessage(ws?.userId, authorId, dmPeerId);
+}
 
 app.use(cors({ origin: corsOriginValidator, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
@@ -244,6 +343,7 @@ function sanitizeSpamLevel(v) {
 
 
 function sessionCookieOptions(req) {
+  // Cookies stay httpOnly/lax and become secure only when TLS is active at the edge.
   const wantSecure = process.env.COOKIE_SECURE === 'true';
   const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
   return { httpOnly: true, sameSite: 'lax', secure: wantSecure && isHttps, path: '/' };
@@ -672,7 +772,18 @@ app.post('/api/messages', auth, enforceSessionVersion, async (req, res) => {
     uploads: uploads.rows.map((u) => ({ id: u.id, content_type: u.content_type, url: `/api/uploads/${u.id}` }))
   };
   const payload = JSON.stringify({ type: 'message', data: enriched });
-  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+  for (const c of wss.clients) {
+    if (c.readyState !== 1 || !c.userId) continue;
+    // Privacy boundary: DM payloads are only sent to DM participants.
+    if (enriched.dm_peer_id) {
+      if (!wsCanReceiveDmEvent(c, enriched.author_id, enriched.dm_peer_id)) continue;
+      c.send(payload);
+      continue;
+    }
+    // Privacy boundary: channel events require explicit per-connection subscription.
+    if (!wsCanReceiveChannelEvent(c, enriched.channel_id)) continue;
+    c.send(payload);
+  }
 
   const created = await createNotificationsForMessage(enriched, req.userDb);
   for (const n of created) {
@@ -704,7 +815,7 @@ app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => 
     : null;
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
   if (!body.trim() && (!ids || ids.length === 0)) return res.status(400).json({ error: 'empty_body' });
-  const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
+  const q = await pool.query('SELECT author_id, channel_id, dm_peer_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
   if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
@@ -729,7 +840,16 @@ app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => 
       uploads: uploads.rows.map((u) => ({ id: u.id, content_type: u.content_type, url: `/api/uploads/${u.id}` }))
     }
   });
-  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+  for (const c of wss.clients) {
+    if (c.readyState !== 1 || !c.userId) continue;
+    if (m.dm_peer_id) {
+      if (!wsCanReceiveDmEvent(c, m.author_id, m.dm_peer_id)) continue;
+      c.send(payload);
+      continue;
+    }
+    if (!wsCanReceiveChannelEvent(c, m.channel_id)) continue;
+    c.send(payload);
+  }
   res.json({
     ok: true,
     id,
@@ -741,23 +861,68 @@ app.patch('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => 
 app.delete('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
-  const q = await pool.query('SELECT author_id FROM messages WHERE id = $1', [id]);
+  const q = await pool.query('SELECT author_id, channel_id, dm_peer_id FROM messages WHERE id = $1', [id]);
   const m = q.rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
   if (Number(m.author_id) !== Number(req.user.sub) && !userCanAdmin(req.userDb)) return res.status(403).json({ error: 'forbidden' });
-  const r = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
+  await pool.query('DELETE FROM messages WHERE id = $1', [id]);
   const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
-  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+  for (const c of wss.clients) {
+    if (c.readyState !== 1 || !c.userId) continue;
+    if (m.dm_peer_id) {
+      if (!wsCanReceiveDmEvent(c, m.author_id, m.dm_peer_id)) continue;
+      c.send(payload);
+      continue;
+    }
+    if (!wsCanReceiveChannelEvent(c, m.channel_id)) continue;
+    c.send(payload);
+  }
   res.json({ ok: true });
 });
 
-app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
-  const since = Number(req.params.id);
+function parseMessageScopeFromQuery(req) {
   const channelId = req.query.channelId ? Number(req.query.channelId) : null;
   const dmPeerId = req.query.dmPeerId ? Number(req.query.dmPeerId) : null;
+  const hasChannel = Number.isFinite(channelId) && channelId > 0;
+  const hasDm = Number.isFinite(dmPeerId) && dmPeerId > 0;
+  if ((hasChannel && hasDm) || (!hasChannel && !hasDm)) return null;
+  return { channelId, dmPeerId, hasChannel, hasDm };
+}
+
+function parseMessageLimit(rawValue, defaultLimit, maxLimit) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return defaultLimit;
+  return Math.max(1, Math.min(maxLimit, Math.floor(parsed)));
+}
+
+function resolveMessageScopeOrError(req, res) {
+  const scope = parseMessageScopeFromQuery(req);
+  if (!scope) {
+    res.status(400).json({ error: 'scope_required' });
+    return null;
+  }
+  const { channelId, dmPeerId, hasChannel } = scope;
+  if (hasChannel && !canUserReadChannel(req.user.sub, channelId)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  if (!hasChannel && !canUserReadDm(req.user.sub, dmPeerId)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  return scope;
+}
+
+app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
+  const since = Number(req.params.id);
+  const scope = resolveMessageScopeOrError(req, res);
+  if (!Number.isFinite(since) || since < 0) return res.status(400).json({ error: 'invalid_id' });
+  if (!scope) return;
+  const { channelId, dmPeerId, hasChannel } = scope;
+  const limit = parseMessageLimit(null, 500, 500);
 
   let rows;
-  if (channelId) {
+  if (hasChannel) {
     ({ rows } = await pool.query(`
       SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id, m.dm_peer_id, m.reply_to,
              u.username, u.display_name, u.display_color,
@@ -766,9 +931,9 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
       JOIN users u ON u.id=m.author_id
       LEFT JOIN messages rm ON rm.id = m.reply_to
       WHERE m.id > $1 AND m.channel_id = $2
-      ORDER BY m.id ASC LIMIT 500
-    `, [since, channelId]));
-  } else if (dmPeerId) {
+      ORDER BY m.id ASC LIMIT $3
+    `, [since, channelId, limit]));
+  } else {
     ({ rows } = await pool.query(`
       SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id,
              CASE WHEN m.author_id = $2 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
@@ -782,10 +947,8 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
       WHERE m.id > $1
         AND ((m.author_id = $2 AND m.dm_peer_id = $3) OR (m.author_id = $3 AND m.dm_peer_id = $2))
       ORDER BY m.id ASC
-      LIMIT 500
-    `, [since, req.user.sub, dmPeerId]));
-  } else {
-    ({ rows } = await pool.query('SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id, m.dm_peer_id, m.reply_to, u.username, u.display_name, u.display_color, rm.body AS reply_body, rm.author_id AS reply_author_id FROM messages m JOIN users u ON u.id=m.author_id LEFT JOIN messages rm ON rm.id=m.reply_to WHERE m.id > $1 ORDER BY m.id ASC LIMIT 500', [since]));
+      LIMIT $4
+    `, [since, req.user.sub, dmPeerId, limit]));
   }
   const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
   const byId = new Map();
@@ -802,6 +965,156 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
   }
   res.json(rows);
 });
+
+app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) => {
+  const scope = resolveMessageScopeOrError(req, res);
+  if (!scope) return;
+  const { channelId, dmPeerId, hasChannel } = scope;
+
+  const limit = parseMessageLimit(req.query.limit, 100, 200);
+  let rows;
+  if (hasChannel) {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id, m.dm_peer_id, m.reply_to,
+               u.username, u.display_name, u.display_color,
+               rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        WHERE m.channel_id = $1
+        ORDER BY m.id DESC
+        LIMIT $2
+      ) r
+      ORDER BY r.id ASC
+    `, [channelId, limit]));
+  } else {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id,
+               CASE WHEN m.author_id = $1 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
+               u.username, u.display_name, u.display_color,
+               LEAST(m.author_id, m.dm_peer_id) AS dm_user_a,
+               GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b,
+               m.reply_to, rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        WHERE (m.author_id = $1 AND m.dm_peer_id = $2) OR (m.author_id = $2 AND m.dm_peer_id = $1)
+        ORDER BY m.id DESC
+        LIMIT $3
+      ) r
+      ORDER BY r.id ASC
+    `, [req.user.sub, dmPeerId, limit]));
+  }
+
+  const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
+  const byId = new Map();
+  if (messageIds.length) {
+    const upl = await pool.query('SELECT mu.message_id, u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = ANY($1::bigint[]) ORDER BY u.id ASC', [messageIds]);
+    for (const r of upl.rows) {
+      const arr = byId.get(Number(r.message_id)) || [];
+      arr.push({ id: r.id, content_type: r.content_type, url: `/api/uploads/${r.id}` });
+      byId.set(Number(r.message_id), arr);
+    }
+  }
+  for (const r of rows) {
+    r.uploads = byId.get(Number(r.id)) || [];
+  }
+  // Recent route is scope-based only; it does not require/validate any trigger message.
+  res.json(rows);
+});
+
+app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res) => {
+  const triggerId = Number(req.params.id);
+  const scope = resolveMessageScopeOrError(req, res);
+  if (!Number.isFinite(triggerId) || triggerId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  if (!scope) return;
+  const { channelId, dmPeerId, hasChannel } = scope;
+
+  const limit = parseMessageLimit(req.query.limit, 10, 100);
+  let rows;
+  if (hasChannel) {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id, m.dm_peer_id, m.reply_to,
+               u.username, u.display_name, u.display_color,
+               rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        WHERE m.id <= $1 AND m.channel_id = $2
+        ORDER BY m.id DESC
+        LIMIT $3
+      ) w
+      ORDER BY w.id ASC
+    `, [triggerId, channelId, limit]));
+  } else {
+    ({ rows } = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT m.id, m.author_id, m.body, m.created_at, m.edited_at, m.channel_id,
+               CASE WHEN m.author_id = $2 THEN m.dm_peer_id ELSE m.author_id END AS dm_peer_id,
+               u.username, u.display_name, u.display_color,
+               LEAST(m.author_id, m.dm_peer_id) AS dm_user_a,
+               GREATEST(m.author_id, m.dm_peer_id) AS dm_user_b,
+               m.reply_to, rm.body AS reply_body, rm.author_id AS reply_author_id
+        FROM messages m
+        JOIN users u ON u.id = m.author_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to
+        -- Access boundary: only include messages from the caller+peer DM pair.
+        WHERE m.id <= $1
+          AND ((m.author_id = $2 AND m.dm_peer_id = $3) OR (m.author_id = $3 AND m.dm_peer_id = $2))
+        ORDER BY m.id DESC
+        LIMIT $4
+      ) w
+      ORDER BY w.id ASC
+    `, [triggerId, req.user.sub, dmPeerId, limit]));
+  }
+
+  const messageIds = rows.map((r) => Number(r.id)).filter((v) => Number.isFinite(v));
+  const byId = new Map();
+  if (messageIds.length) {
+    const upl = await pool.query('SELECT mu.message_id, u.id, u.content_type FROM message_uploads mu JOIN uploads u ON u.id = mu.upload_id WHERE mu.message_id = ANY($1::bigint[]) ORDER BY u.id ASC', [messageIds]);
+    for (const r of upl.rows) {
+      const arr = byId.get(Number(r.message_id)) || [];
+      arr.push({ id: r.id, content_type: r.content_type, url: `/api/uploads/${r.id}` });
+      byId.set(Number(r.message_id), arr);
+    }
+  }
+  for (const r of rows) {
+    r.uploads = byId.get(Number(r.id)) || [];
+  }
+
+  const hasTrigger = rows.some((r) => Number(r.id) === triggerId);
+  if (!hasTrigger) return res.status(404).json({ error: 'not_found' });
+  res.json(rows);
+});
+
+async function resolveAccessibleUpload(userId, uploadId) {
+  const { rows } = await pool.query(`
+    SELECT u.id, u.storage_name, u.content_type, m.author_id, m.dm_peer_id, m.channel_id
+    FROM uploads u
+    JOIN message_uploads mu ON mu.upload_id = u.id
+    JOIN messages m ON m.id = mu.message_id
+    WHERE u.id = $1
+    ORDER BY m.id DESC
+  `, [uploadId]);
+
+  for (const r of rows) {
+    const isDm = Number.isFinite(Number(r.dm_peer_id)) && Number(r.dm_peer_id) > 0;
+    if (isDm && canUserReadDmMessage(userId, r.author_id, r.dm_peer_id)) {
+      return { id: r.id, storage_name: r.storage_name, content_type: r.content_type };
+    }
+    if (!isDm && canUserReadChannel(userId, r.channel_id)) {
+      return { id: r.id, storage_name: r.storage_name, content_type: r.content_type };
+    }
+  }
+  return null;
+}
 
 app.post('/api/upload-image', auth, enforceSessionVersion, upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'missing_file' });
@@ -820,8 +1133,9 @@ app.post('/api/upload-image', auth, enforceSessionVersion, upload.single('image'
 });
 
 app.get('/api/uploads/:id', auth, enforceSessionVersion, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM uploads WHERE id=$1', [req.params.id]);
-  const u = rows[0];
+  const uploadId = Number(req.params.id);
+  if (!Number.isFinite(uploadId) || uploadId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const u = await resolveAccessibleUpload(req.user.sub, uploadId);
   if (!u) return res.status(404).end();
   res.setHeader('Content-Type', u.content_type);
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -877,21 +1191,51 @@ app.get('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
 
 wss.on('connection', async (ws, req) => {
   ws.userId = null;
+  ws.subscribedChannelIds = new Set();
+
+  // Enforce the same trusted-origin policy used by HTTP before any WS traffic.
+  if (!isTrustedBrowserOrigin(req.headers.origin || '')) {
+    ws.close(1008, 'origin_not_allowed');
+    return;
+  }
+
   try {
     const cookies = parseCookieHeader(req.headers.cookie || '');
     const raw = cookies.gc_session;
-    if (raw) {
-      const data = jwt.verify(raw, JWT_SECRET);
-      const { rows } = await pool.query('SELECT id, session_version, disabled FROM users WHERE id = $1', [data.sub]);
-      const u = rows[0];
-      if (u && !u.disabled && u.session_version === data.sv) ws.userId = Number(u.id);
+    if (!raw) {
+      ws.close(1008, 'unauthorized');
+      return;
     }
-  } catch {}
+    const data = jwt.verify(raw, JWT_SECRET);
+    const { rows } = await pool.query('SELECT id, session_version, disabled FROM users WHERE id = $1', [data.sub]);
+    const u = rows[0];
+    if (!u || u.disabled || u.session_version !== data.sv) {
+      ws.close(1008, 'unauthorized');
+      return;
+    }
+    ws.userId = Number(u.id);
+  } catch {
+    ws.close(1008, 'unauthorized');
+    return;
+  }
 
   ws.send(JSON.stringify({ type: 'hello' }));
 
-  ws.on('message', () => {
+  ws.on('message', (raw) => {
     if (!ws.userId) return;
+    let msg;
+    try {
+      msg = JSON.parse(String(raw || ''));
+    } catch {
+      return;
+    }
+    if (msg?.type !== 'subscribe' || !Array.isArray(msg.channelIds)) return;
+    const nextIds = new Set(
+      msg.channelIds
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0)
+    );
+    ws.subscribedChannelIds = nextIds;
   });
 });
 

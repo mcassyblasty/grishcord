@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Lightweight installer sanity check:
+# - validates installer helper functions with temp files and mocked calls
+# - does NOT run hardware stress/burn-in or long destructive tests
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d /tmp/grishcord-install-smoke.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
