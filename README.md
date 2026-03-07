@@ -42,7 +42,12 @@ Re-run safely at any time:
 - `./scripts/grishcordctl.sh status` (compose status + LAN URL)
 - `./scripts/grishcordctl.sh logs` (recent stack logs)
 - `./scripts/grishcordctl.sh doctor` (check prerequisites + compose diagnostics)
-- `./scripts/grishbot-restart.sh` (force-recreate only the bot service to reload bot modules)
+- `make install-sanity` (runs lightweight installer helper sanity checks; temp files + mocked calls, no burn-in/stress)
+- `./scripts/aibotctl.sh restart` (force-recreate only the bot service to reload bot modules)
+
+Control split:
+- `./scripts/grishcordctl.sh` = stack/app lifecycle and health operations
+- `./scripts/aibotctl.sh` = Ollama + GrishBot runtime/config operations
 
 ## Docs
 - `docs/GRISHCORD_SPEC.tex`
@@ -101,10 +106,12 @@ The AI bot runs as a separate service (`bot/`) and authenticates like a regular 
 
 ### Configure Ollama on the host VM
 Use:
-- `./scripts/ollamactrl.sh install`
-- `./scripts/ollamactrl.sh update`
-- `./scripts/ollamactrl.sh start`
-- `./scripts/ollamactrl.sh stop`
+- `./scripts/aibotctl.sh ollama install`
+- `./scripts/aibotctl.sh ollama update`
+- `./scripts/aibotctl.sh ollama start`
+- `./scripts/aibotctl.sh ollama stop`
+
+You can still use the legacy top-level aliases (`install|update|start|stop`) for compatibility.
 
 `install` and `update` use:
 - `curl -fsSL https://ollama.com/install.sh | sh`
@@ -113,7 +120,7 @@ Use:
 
 
 ### Ollama networking modes (secure vs docker)
-`./scripts/ollamactrl.sh` supports two bind modes and persists your choice in `.ollama.env` (`OLLAMA_BIND_MODE`):
+`./scripts/aibotctl.sh` supports two bind modes and persists your choice in `.ollama.env` (`OLLAMA_BIND_MODE`):
 
 - **secure** (default): Ollama binds to `127.0.0.1:11434`.
   - Best default for host security.
@@ -127,14 +134,15 @@ Use:
 
 The bot compose service is already configured with `extra_hosts: ["host.docker.internal:host-gateway"]` and defaults to `OLLAMA_BASE_URL=http://host.docker.internal:11434`.
 
-`ollamactrl` now waits for the Ollama API to become ready before model pulls, reducing restart/pull race failures.
+`aibotctl` now waits for the Ollama API to become ready before model pulls, reducing restart/pull race failures.
 The bot also performs an Ollama preflight (`GET /api/tags`) at startup and before first generation, and logs actionable firewall guidance if unreachable.
 
 ### Configure bot identity/runtime defaults
 Use:
-- `./scripts/aibotctl.sh install`
-- `./scripts/aibotctl.sh config`
-- `./scripts/aibotctl.sh show`
+- `./scripts/aibotctl.sh bot install`
+- `./scripts/aibotctl.sh bot config`
+- `./scripts/aibotctl.sh bot show`
+- `./scripts/aibotctl.sh bot restart`
 
 This writes `.aibot.env` (editable later) with:
 - `BOT_USERNAME`
