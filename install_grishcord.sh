@@ -243,7 +243,7 @@ normalize_hostname() {
 }
 
 configure_env_wizard() {
-  local current_site current_base current_admin current_display current_db_pass current_jwt
+  local current_site current_base current_admin current_display current_db_pass current_jwt current_bootstrap
   local site_input site_host admin_username admin_display admin_password postgres_password db_user db_name
 
   current_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
@@ -252,6 +252,7 @@ configure_env_wizard() {
   current_display="${ROOT_ADMIN_DISPLAY_NAME:-${current_admin:-Root Admin}}"
   current_db_pass="$(get_env_key POSTGRES_PASSWORD || true)"
   current_jwt="$(get_env_key JWT_SECRET || true)"
+  current_bootstrap="$(get_env_key BOOTSTRAP_ROOT_TOKEN || true)"
 
   if [[ -z "${current_site// }" && -n "${current_base// }" ]]; then
     current_site="$(normalize_hostname "$current_base")"
@@ -285,6 +286,11 @@ configure_env_wizard() {
     log "Generated secure JWT_SECRET"
   fi
 
+  if [[ -z "${current_bootstrap// }" ]] || is_placeholder_like "$current_bootstrap" || [[ ${#current_bootstrap} -lt 32 ]]; then
+    current_bootstrap="$(generate_secure_hex 32)"
+    log "Generated secure BOOTSTRAP_ROOT_TOKEN"
+  fi
+
   db_user="$(get_env_key POSTGRES_USER || true)"
   db_name="$(get_env_key POSTGRES_DB || true)"
   db_user="${db_user:-grishcord}"
@@ -293,6 +299,7 @@ configure_env_wizard() {
   set_env_key POSTGRES_PASSWORD "$postgres_password"
   set_env_key DATABASE_URL "postgres://${db_user}:${postgres_password}@postgres:5432/${db_name}"
   set_env_key JWT_SECRET "$current_jwt"
+  set_env_key BOOTSTRAP_ROOT_TOKEN "$current_bootstrap"
   set_env_key ADMIN_USERNAME "$admin_username"
   set_env_key PUBLIC_BASE_URL "https://${site_host}"
   set_env_key CORS_ORIGINS "https://${site_host}"
@@ -397,7 +404,14 @@ bootstrap_root_admin() {
   payload=$(printf '{"username":"%s","displayName":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_DISPLAY_NAME" "$ROOT_ADMIN_PASSWORD")
   local status resp
   resp="$(mktemp /tmp/grish-bootstrap.XXXXXX.json)"
-  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
+  local bootstrap_token
+  bootstrap_token="$(get_env_key BOOTSTRAP_ROOT_TOKEN || true)"
+  if [[ -z "${bootstrap_token// }" ]]; then
+    err "BOOTSTRAP_ROOT_TOKEN is required for initial root bootstrap."
+    exit 1
+  fi
+
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -H "x-bootstrap-token: $bootstrap_token" -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
 
   if [[ "$status" == "200" ]]; then
     rm -f "$resp"
