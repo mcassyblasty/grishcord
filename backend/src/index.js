@@ -1358,6 +1358,14 @@ app.use((err, _req, res, _next) => {
   return res.status(500).json({ error: 'internal_error' });
 });
 
+
+app.use((err, _req, res, _next) => {
+  if (res.headersSent) return;
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.code });
+  console.error('request error', err?.message || err);
+  return res.status(500).json({ error: 'internal_error' });
+});
+
 wss.on('connection', async (ws, req) => {
   ws.userId = null;
   ws.sessionVersion = null;
