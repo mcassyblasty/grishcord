@@ -23,7 +23,7 @@ The installer asks for:
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
 
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
-When needed, installer auto-generates secure `JWT_SECRET` and `POSTGRES_PASSWORD` values during the wizard.
+When needed, installer auto-generates secure `JWT_SECRET`, `BOOTSTRAP_ROOT_TOKEN`, and `POSTGRES_PASSWORD` values during the wizard.
 Local runtime config files (`.env`, `.install.env`, `.aibot.env`, `.ollama.env`) are intentionally gitignored and should stay private.
 
 Re-run safely at any time:
@@ -69,6 +69,8 @@ Control split:
 
 ## Security-sensitive config
 - `JWT_SECRET` is required and backend startup now fails if it is missing, too short (<32 chars), or placeholder-like (for example `change-me` or `replace_with_long_random_secret`).
+- `BOOTSTRAP_ROOT_TOKEN` is required to authorize unauthenticated `POST /api/bootstrap/root`; when unset/invalid, bootstrap is disabled (`bootstrap_disabled`).
+- `POST /api/bootstrap/root` requires header `x-bootstrap-token` matching `BOOTSTRAP_ROOT_TOKEN` and remains closed after the first user exists.
 - `grishcordctl` preflights `JWT_SECRET` before start/restart/update-start and aborts early with a clear message if it is invalid.
 - `PUBLIC_BASE_URL` and/or `CORS_ORIGINS` must resolve to valid trusted origins (for example `https://chat.example.com`).
 - In production/container-style deployments, backend startup fails closed when trusted origin config is empty or invalid.
@@ -88,6 +90,7 @@ Control split:
 ## Upload limits
 - Supports image attachments and `.zip` attachments.
 - Default backend upload cap is 100MB via `MAX_UPLOAD_BYTES` in `.env`.
+- Unattached uploads are reaped automatically after `UNATTACHED_UPLOAD_TTL_MS` (default 24h), in batches controlled by `UPLOAD_REAP_BATCH`.
 
 
 ## Cloudflare / Internet edge note
