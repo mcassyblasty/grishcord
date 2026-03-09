@@ -18,9 +18,9 @@ export function filterNotificationFeedRows(rows, userId) {
   const viewerId = asId(userId);
   if (!viewerId) return [];
   return (Array.isArray(rows) ? rows : []).filter((r) => {
-    const dmPeerId = asId(r?.dm_peer_id);
-    if (!dmPeerId) return true;
+    const dmMessagePeerId = asId(r?.message_dm_peer_id);
+    if (!dmMessagePeerId) return true;
     const authorId = asId(r?.author_id);
-    return authorId === viewerId || dmPeerId === viewerId;
+    return authorId === viewerId || dmMessagePeerId === viewerId;
   });
 }

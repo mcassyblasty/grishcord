@@ -47,30 +47,36 @@ test('session_version invalidation revokes already-open socket', () => {
   assert.equal(a.authRevoked, true);
 });
 
-test('authorized socket remains send-eligible', () => {
+test('authorized socket remains send-eligible', async () => {
   const ws = makeSocket({ userId: 5, sessionVersion: 9 });
-  assert.equal(ensureSocketAuthorizedForSend(ws), true);
+  assert.equal(await ensureSocketAuthorizedForSend(ws, { validateSocketAuthState: async () => true }), true);
   assert.equal(ws.closed, false);
 });
 
-test('defensive outbound check closes stale/unauthorized sockets', () => {
+test('defensive outbound check closes stale/unauthorized sockets', async () => {
   const missingSv = makeSocket({ userId: 5, sessionVersion: null });
   const revoked = makeSocket({ userId: 6, sessionVersion: 1 });
+  const stale = makeSocket({ userId: 9, sessionVersion: 2 });
   revoked.authRevoked = true;
 
-  assert.equal(ensureSocketAuthorizedForSend(missingSv), false);
+  assert.equal(await ensureSocketAuthorizedForSend(missingSv, { validateSocketAuthState: async () => true }), false);
   assert.equal(missingSv.closed, true);
   assert.equal(missingSv.closeReason, 'unauthorized');
 
-  assert.equal(ensureSocketAuthorizedForSend(revoked), false);
+  assert.equal(await ensureSocketAuthorizedForSend(revoked, { validateSocketAuthState: async () => true }), false);
   assert.equal(revoked.closed, true);
   assert.equal(revoked.closeReason, 'session_revoked');
+
+  assert.equal(await ensureSocketAuthorizedForSend(stale, { validateSocketAuthState: async () => false }), false);
+  assert.equal(stale.closed, true);
+  assert.equal(stale.closeReason, 'session_revoked');
 });
 
 test('backend wires revocation hooks and outbound defensive checks', () => {
   assert.match(source, /revokeSocketsForUser\(wss, data\.sub, \{ reason: 'session_revoked' \}\)/);
   assert.match(source, /if \(disabled\) revokeSocketsForUser\(wss, targetId, \{ reason: 'user_disabled' \}\)/);
   assert.match(source, /revokeSocketsForUser\(wss, userId, \{ reason: 'session_revoked' \}\)/);
-  assert.match(source, /if \(!ensureSocketAuthorizedForSend\(c\)\) continue;/);
+  assert.match(source, /revokeSocketsForUser\(wss, id, \{ reason: 'user_deleted' \}\)/);
+  assert.match(source, /await ensureSocketAuthorizedForSend\(c, \{ validateSocketAuthState \}\)/);
   assert.match(source, /ws\.sessionVersion = Number\(u\.session_version\)/);
 });

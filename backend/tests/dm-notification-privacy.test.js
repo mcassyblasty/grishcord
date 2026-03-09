@@ -29,16 +29,25 @@ test('channel mention behavior remains eligible for non-sender users', () => {
 
 test('/api/notifications defensive filter strips unauthorized DM preview rows', () => {
   const rows = [
-    { id: 1, dm_peer_id: 2, author_id: 1, body: 'visible dm' },
-    { id: 2, dm_peer_id: 2, author_id: 4, body: 'leaked dm' },
-    { id: 3, dm_peer_id: null, author_id: 4, body: 'channel' }
+    { id: 1, dm_peer_id: 1, message_dm_peer_id: 2, author_id: 1, body: 'visible dm' },
+    { id: 2, dm_peer_id: 1, message_dm_peer_id: 2, author_id: 4, body: 'leaked dm' },
+    { id: 3, dm_peer_id: null, message_dm_peer_id: null, author_id: 4, body: 'channel' }
   ];
   const filtered = filterNotificationFeedRows(rows, 1);
   assert.deepEqual(filtered.map((r) => r.id), [1, 3]);
 });
 
+
+test('DM recipient remains visible even when notification dm_peer metadata points at author', () => {
+  const rows = [
+    { id: 10, dm_peer_id: 1, message_dm_peer_id: 2, author_id: 1, body: 'dm to recipient' }
+  ];
+  const filteredForRecipient = filterNotificationFeedRows(rows, 2);
+  assert.deepEqual(filteredForRecipient.map((r) => r.id), [10]);
+});
 test('backend wires DM privacy helper into recipient creation and notifications feed', () => {
   assert.match(source, /if \(!isNotificationRecipientEligible\(msg, authorId, userId\)\) continue;/);
   assert.match(source, /const visibleRows = filterNotificationFeedRows\(rows, req\.user\.sub\)/);
   assert.match(source, /m\.author_id,/);
+  assert.match(source, /m\.dm_peer_id AS message_dm_peer_id,/);
 });

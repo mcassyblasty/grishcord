@@ -33,6 +33,6 @@ test('bootstrap is disabled by default when secret is missing/invalid', () => {
 test('backend route enforces bootstrap token and remains closed after initialization', () => {
   assert.match(source, /if \(!isBootstrapSecretConfigured\(BOOTSTRAP_ROOT_TOKEN\)\) return res\.status\(503\)\.json\(\{ error: 'bootstrap_disabled' \}\)/);
   assert.match(source, /if \(!isBootstrapAuthorized\(BOOTSTRAP_ROOT_TOKEN, providedBootstrapToken\)\) return res\.status\(403\)\.json\(\{ error: 'bootstrap_forbidden' \}\)/);
-  assert.match(source, /const existing = await pool\.query\('SELECT id FROM users ORDER BY id ASC LIMIT 1'\)/);
-  assert.match(source, /if \(existing\.rows\[0\]\) return res\.status\(409\)\.json\(\{ error: 'already_initialized' \}\)/);
+  assert.match(source, /const created = await createRootAdminIfFirst\(\{/);
+  assert.match(source, /if \(!created\) return res\.status\(409\)\.json\(\{ error: 'already_initialized' \}\)/);
 });

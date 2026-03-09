@@ -37,6 +37,25 @@ test('sensitive routes use asyncRoute + shared validation helpers', () => {
   assert.match(source, /app\.post\('\/api\/upload-image'.*asyncRoute\(async \(req, res\) => \{/s);
 });
 
+
+test('remaining async api routes are wrapped by asyncRoute', () => {
+  assert.doesNotMatch(source, /app\.(?:get|post|patch|delete)\('\/api[^\n]*, async \(req, res\) => \{/);
+  assert.doesNotMatch(source, /app\.(?:get|post|patch|delete)\('\/api[^\n]*, async \(_req, res\) => \{/);
+});
+
+test('bootstrap/admin mutation payloads are validated consistently', () => {
+  assert.match(source, /app\.post\('\/api\/bootstrap\/root'.*validateUsername\(requireStringField\(req\.body, 'username'/s);
+  assert.match(source, /app\.post\('\/api\/bootstrap\/root'.*validatePassword\(req\.body\?\.password\)/s);
+  assert.match(source, /app\.post\('\/api\/admin\/users\/:id\/disable'.*disabled_required/s);
+  assert.match(source, /app\.post\('\/api\/admin\/users\/:id\/admin'.*is_admin_required/s);
+  assert.match(source, /app\.post\('\/api\/admin\/settings'.*invalid_anti_spam_level/s);
+});
+
+test('message/edit/upload/notification routes reject malformed ids before data access', () => {
+  assert.match(source, /app\.get\('\/api\/uploads\/:id'.*parsePositiveId\(req\.params\.id, 'id'\)/s);
+  assert.match(source, /app\.delete\('\/api\/notifications\/:id'.*parsePositiveId\(req\.params\.id, 'id'\)/s);
+  assert.match(source, /app\.get\('\/api\/messages\/:id'.*parsePositiveId\(req\.params\.id, 'id'\)/s);
+});
 test('centralized error middleware returns safe non-leaky response', () => {
   assert.match(source, /app\.use\(\(err, _req, res, _next\) => \{/);
   assert.match(source, /if \(err instanceof HttpError\) return res\.status\(err\.status\)\.json\(\{ error: err\.code \}\)/);

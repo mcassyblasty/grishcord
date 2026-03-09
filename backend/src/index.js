@@ -23,6 +23,7 @@ import { commitUploadedTempFile } from './upload-storage.js';
 import { normalizeUploadIds, findUnreferencedUploadsByIds, deleteUnreferencedUploadsByIds, findStaleUnattachedUploads } from './upload-lifecycle.js';
 import { canUserReadArchivedChannel } from './channel-access.js';
 import { registerWithSingleUseInvite } from './invite.js';
+import { createRootAdminIfFirst } from './bootstrap.js';
 import { HttpError, asyncRoute, parsePositiveId, requireStringField, optionalStringField, validateUsername, validatePassword } from './http-helpers.js';
 
 dotenv.config();
@@ -221,6 +222,16 @@ function wsCanReceiveDmEvent(ws, authorId, dmPeerId) {
   return canUserReadDmMessage(ws?.userId, authorId, dmPeerId);
 }
 
+async function validateSocketAuthState(ws) {
+  const userId = Number(ws?.userId || 0);
+  const sessionVersion = Number(ws?.sessionVersion || 0);
+  if (!userId || !sessionVersion) return false;
+  const { rows } = await pool.query('SELECT id, session_version, disabled FROM users WHERE id = $1', [userId]);
+  const u = rows[0];
+  if (!u || u.disabled) return false;
+  return Number(u.session_version) === sessionVersion;
+}
+
 app.use(cors({ origin: corsOriginValidator, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -415,26 +426,26 @@ app.post('/api/register', authRateLimit({ windowMs: 10 * 60 * 1000, max: 8, bloc
   res.json({ ok: true });
 }));
 
-app.post('/api/bootstrap/root', authRateLimit({ windowMs: 10 * 60 * 1000, max: 10, blockMs: 20 * 60 * 1000, bucket: 'bootstrap_root' }), async (req, res) => {
+app.post('/api/bootstrap/root', authRateLimit({ windowMs: 10 * 60 * 1000, max: 10, blockMs: 20 * 60 * 1000, bucket: 'bootstrap_root' }), asyncRoute(async (req, res) => {
   if (!isBootstrapSecretConfigured(BOOTSTRAP_ROOT_TOKEN)) return res.status(503).json({ error: 'bootstrap_disabled' });
   const providedBootstrapToken = String(req.get('x-bootstrap-token') || '').trim();
   if (!isBootstrapAuthorized(BOOTSTRAP_ROOT_TOKEN, providedBootstrapToken)) return res.status(403).json({ error: 'bootstrap_forbidden' });
 
-  const username = String(req.body.username || '').trim();
-  const displayName = String(req.body.displayName || '').trim() || username;
-  const password = String(req.body.password || '');
-  if (!username || !password) return res.status(400).json({ error: 'username_password_required' });
-
-  const existing = await pool.query('SELECT id FROM users ORDER BY id ASC LIMIT 1');
-  if (existing.rows[0]) return res.status(409).json({ error: 'already_initialized' });
+  const username = validateUsername(requireStringField(req.body, 'username', { min: 3, max: 32, trim: true }));
+  const displayName = optionalStringField(req.body, 'displayName', { max: 64, trim: true, fallback: username });
+  const password = validatePassword(req.body?.password);
 
   const pw = await bcrypt.hash(password, 12);
-  const created = await pool.query(
-    'INSERT INTO users (username, display_name, display_color, password_hash, is_admin) VALUES ($1,$2,$3,$4,true) RETURNING id, username, display_name, is_admin',
-    [username, displayName, randomDisplayColor(), pw]
-  );
-  res.json({ ok: true, user: created.rows[0], rootAdminUsername: ADMIN_USERNAME });
-});
+  const created = await createRootAdminIfFirst({
+    pool,
+    username,
+    displayName,
+    displayColor: randomDisplayColor(),
+    passwordHash: pw
+  });
+  if (!created) return res.status(409).json({ error: 'already_initialized' });
+  res.json({ ok: true, user: created, rootAdminUsername: ADMIN_USERNAME });
+}));
 
 app.post('/api/login', authRateLimit({ windowMs: 10 * 60 * 1000, max: 12, blockMs: 15 * 60 * 1000, bucket: 'login' }), asyncRoute(async (req, res) => {
   const username = validateUsername(requireStringField(req.body, 'username', { min: 3, max: 32, trim: true }));
@@ -460,15 +471,15 @@ app.post('/api/logout', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/me', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/me', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const { rows } = await pool.query('SELECT id, username, display_name, display_color, is_admin, notification_sounds_enabled FROM users WHERE id=$1', [req.user.sub]);
   const me = rows[0] || null;
   if (!me) return res.status(404).json({ error: 'not_found' });
   me.is_admin = userCanAdmin(me);
   res.json(me);
-});
+}));
 
-app.patch('/api/me/profile', auth, enforceSessionVersion, async (req, res) => {
+app.patch('/api/me/profile', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const displayName = String(req.body.displayName || '').trim();
   const displayColorRaw = String(req.body.displayColor || '').trim();
   if (!displayName) return res.status(400).json({ error: 'display_name_required' });
@@ -479,10 +490,10 @@ app.patch('/api/me/profile', auth, enforceSessionVersion, async (req, res) => {
     [displayName, displayColor, req.user.sub]
   );
   res.json(rows[0]);
-});
+}));
 
 
-app.patch('/api/me/preferences', auth, enforceSessionVersion, async (req, res) => {
+app.patch('/api/me/preferences', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   if (typeof req.body.notificationSoundsEnabled !== 'boolean') {
     return res.status(400).json({ error: 'invalid_notification_preference' });
   }
@@ -495,16 +506,16 @@ app.patch('/api/me/preferences', auth, enforceSessionVersion, async (req, res) =
   if (!me) return res.status(404).json({ error: 'not_found' });
   me.is_admin = userCanAdmin(me);
   res.json(me);
-});
+}));
 
-app.get('/api/channels', auth, enforceSessionVersion, async (_req, res) => {
+app.get('/api/channels', auth, enforceSessionVersion, asyncRoute(async (_req, res) => {
   const { rows } = await pool.query(
     "SELECT id, name, kind, position, announcement_only FROM channels WHERE archived=false AND kind = 'text' ORDER BY position ASC, id ASC"
   );
   res.json(rows);
-});
+}));
 
-app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const kind = String(req.body.kind || 'text');
   if (!name) return res.status(400).json({ error: 'name_required' });
@@ -512,11 +523,10 @@ app.post('/api/admin/channels', auth, enforceSessionVersion, adminOnly, async (r
   const pos = await pool.query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM channels WHERE kind = $1', [kind]);
   await pool.query('INSERT INTO channels(name, kind, position, archived, announcement_only) VALUES ($1, $2, $3, false, false)', [name, kind, Number(pos.rows[0].next)]);
   res.json({ ok: true });
-});
+}));
 
-app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
   const name = req.body.name === undefined ? null : String(req.body.name).trim();
   const position = req.body.position === undefined ? null : Number(req.body.position);
   const archived = req.body.archived === undefined ? null : req.body.archived === true;
@@ -538,16 +548,15 @@ app.patch('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asy
     await pool.query('UPDATE channels SET announcement_only = $1 WHERE id = $2', [announcementOnly, id]);
   }
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.delete('/api/admin/channels/:id', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
   await pool.query('UPDATE channels SET archived = true WHERE id = $1', [id]);
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/dms', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.username, u.display_name, u.display_color,
            MAX(m.created_at) AS last_message_at
@@ -563,9 +572,9 @@ app.get('/api/dms', auth, enforceSessionVersion, async (req, res) => {
     ORDER BY last_message_at DESC NULLS LAST, u.username ASC
   `, [req.user.sub]);
   res.json(rows);
-});
+}));
 
-app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
+app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, asyncRoute(async (_req, res) => {
   const invites = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC LIMIT 50');
   const users = await pool.query('SELECT id, username, display_name, disabled, is_admin, created_at FROM users ORDER BY id ASC');
   const channels = await pool.query('SELECT id, name, kind, position, archived, announcement_only FROM channels ORDER BY kind ASC, position ASC, id ASC');
@@ -577,21 +586,22 @@ app.get('/api/admin/state', auth, enforceSessionVersion, adminOnly, async (_req,
     antiSpamLevel: antiSpam.antiSpamLevel,
     antiSpamEffective: antiSpam.antiSpamEffective
   });
-});
+}));
 
-app.post('/api/admin/invites', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+app.post('/api/admin/invites', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
   const raw = token(24);
   const ttlDays = Number(process.env.INVITE_TTL_DAYS || 7);
   await pool.query("INSERT INTO invites(token_hash, expires_at) VALUES($1, now() + ($2 || ' days')::interval)", [sha(raw), String(ttlDays)]);
   res.json({ inviteKey: raw, inviteUrl: `${process.env.PUBLIC_BASE_URL || ''}/register?token=${raw}` });
-});
+}));
 
-app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  await pool.query('UPDATE invites SET revoked_at = now() WHERE id = $1 AND used_at IS NULL', [Number(req.params.id)]);
+app.post('/api/admin/invites/:id/revoke', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const inviteId = parsePositiveId(req.params.id, 'id');
+  await pool.query('UPDATE invites SET revoked_at = now() WHERE id = $1 AND used_at IS NULL', [inviteId]);
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/admin/invites/export', auth, enforceSessionVersion, adminOnly, async (_req, res) => {
+app.get('/api/admin/invites/export', auth, enforceSessionVersion, adminOnly, asyncRoute(async (_req, res) => {
   const { rows } = await pool.query('SELECT id, expires_at, created_at, used_at, revoked_at, used_by FROM invites ORDER BY id DESC');
   const header = 'id,expires_at,created_at,used_at,revoked_at,used_by';
   const csv = [
@@ -608,33 +618,33 @@ app.get('/api/admin/invites/export', auth, enforceSessionVersion, adminOnly, asy
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="invites-export.csv"');
   res.send(csv);
-});
+}));
 
-app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, async (req, res) => {
+app.post('/api/admin/users/:id/disable', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  if (typeof req.body?.disabled !== 'boolean') throw new HttpError(400, 'disabled_required');
   const disabled = req.body.disabled === true;
-  const targetId = Number(req.params.id);
+  const targetId = parsePositiveId(req.params.id, 'id');
   await pool.query('UPDATE users SET disabled = $1 WHERE id = $2 AND username <> $3 AND is_admin = false', [disabled, targetId, ADMIN_USERNAME]);
   if (disabled) revokeSocketsForUser(wss, targetId, { reason: 'user_disabled' });
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/admin/users/:id/admin', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
+app.post('/api/admin/users/:id/admin', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
+  if (typeof req.body?.isAdmin !== 'boolean') throw new HttpError(400, 'is_admin_required');
   const isAdmin = req.body.isAdmin === true;
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
   const u = await pool.query('SELECT id, username FROM users WHERE id = $1', [id]);
   const user = u.rows[0];
   if (!user) return res.status(404).json({ error: 'not_found' });
   if (isRootAdminUsername(user.username)) return res.status(400).json({ error: 'cannot_demote_primary_admin' });
   await pool.query('UPDATE users SET is_admin = $1 WHERE id = $2', [isAdmin, id]);
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
 
-  const confirmUsername = String(req.body.confirmUsername || '');
+  const confirmUsername = requireStringField(req.body, 'confirmUsername', { min: 1, max: 32, trim: true });
   const confirmChecked = req.body.confirmChecked === true;
   if (!confirmChecked) return res.status(400).json({ error: 'confirm_checkbox_required' });
 
@@ -666,17 +676,20 @@ app.post('/api/admin/users/:id/delete', auth, enforceSessionVersion, adminOnly, 
   }
 
   await cleanupUnreferencedUploads(ownedUploadIds);
+  revokeSocketsForUser(wss, id, { reason: 'user_deleted' });
 
   const payload = JSON.stringify({ type: 'user_deleted', data: { id } });
   for (const c of wss.clients) {
-    if (!ensureSocketAuthorizedForSend(c)) continue;
+    if (!(await ensureSocketAuthorizedForSend(c, { validateSocketAuthState }))) continue;
     c.send(payload);
   }
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/admin/settings', auth, enforceSessionVersion, adminOnly, async (req, res) => {
-  const level = sanitizeSpamLevel(req.body.antiSpamLevel);
+app.post('/api/admin/settings', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
+  const providedLevel = req.body?.antiSpamLevel;
+  const level = sanitizeSpamLevel(providedLevel);
+  if (providedLevel !== undefined && level === null) throw new HttpError(400, 'invalid_anti_spam_level');
   if (level !== null) {
     await pool.query('INSERT INTO app_settings(key, value) VALUES ($1, $2::jsonb) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value', ['anti_spam_level', JSON.stringify(level)]);
   }
@@ -686,7 +699,7 @@ app.post('/api/admin/settings', auth, enforceSessionVersion, adminOnly, async (r
     antiSpamLevel: antiSpam.antiSpamLevel,
     antiSpamEffective: antiSpam.antiSpamEffective
   });
-});
+}));
 
 app.post('/api/admin/recovery', auth, enforceSessionVersion, adminOnly, asyncRoute(async (req, res) => {
   const username = validateUsername(requireStringField(req.body, 'username', { min: 3, max: 32, trim: true }));
@@ -850,7 +863,7 @@ app.post('/api/messages', auth, enforceSessionVersion, asyncRoute(async (req, re
   };
   const payload = JSON.stringify({ type: 'message', data: enriched });
   for (const c of wss.clients) {
-    if (!ensureSocketAuthorizedForSend(c)) continue;
+    if (!(await ensureSocketAuthorizedForSend(c, { validateSocketAuthState }))) continue;
     // Privacy boundary: DM payloads are only sent to DM participants.
     if (enriched.dm_peer_id) {
       if (!wsCanReceiveDmEvent(c, enriched.author_id, enriched.dm_peer_id)) continue;
@@ -926,7 +939,7 @@ app.patch('/api/messages/:id', auth, enforceSessionVersion, asyncRoute(async (re
     }
   });
   for (const c of wss.clients) {
-    if (!ensureSocketAuthorizedForSend(c)) continue;
+    if (!(await ensureSocketAuthorizedForSend(c, { validateSocketAuthState }))) continue;
     if (m.dm_peer_id) {
       if (!wsCanReceiveDmEvent(c, m.author_id, m.dm_peer_id)) continue;
       c.send(payload);
@@ -955,7 +968,7 @@ app.delete('/api/messages/:id', auth, enforceSessionVersion, asyncRoute(async (r
   await cleanupUnreferencedUploads(attachedUploadIds);
   const payload = JSON.stringify({ type: 'message_deleted', data: { id } });
   for (const c of wss.clients) {
-    if (!ensureSocketAuthorizedForSend(c)) continue;
+    if (!(await ensureSocketAuthorizedForSend(c, { validateSocketAuthState }))) continue;
     if (m.dm_peer_id) {
       if (!wsCanReceiveDmEvent(c, m.author_id, m.dm_peer_id)) continue;
       c.send(payload);
@@ -1008,7 +1021,7 @@ async function resolveMessageScopeOrError(req, res) {
   return scope;
 }
 
-app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/messages/since/:id', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const since = Number(req.params.id);
   const scope = await resolveMessageScopeOrError(req, res);
   if (!Number.isFinite(since) || since < 0) return res.status(400).json({ error: 'invalid_id' });
@@ -1059,9 +1072,9 @@ app.get('/api/messages/since/:id', auth, enforceSessionVersion, async (req, res)
     r.uploads = byId.get(Number(r.id)) || [];
   }
   res.json(rows);
-});
+}));
 
-app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/messages/recent', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const scope = await resolveMessageScopeOrError(req, res);
   if (!scope) return;
   const { channelId, dmPeerId, hasChannel } = scope;
@@ -1120,9 +1133,9 @@ app.get('/api/messages/recent', auth, enforceSessionVersion, async (req, res) =>
   }
   // Recent route is scope-based only; it does not require/validate any trigger message.
   res.json(rows);
-});
+}));
 
-app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/messages/window/:id', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const triggerId = Number(req.params.id);
   const scope = await resolveMessageScopeOrError(req, res);
   if (!Number.isFinite(triggerId) || triggerId <= 0) return res.status(400).json({ error: 'invalid_id' });
@@ -1187,7 +1200,7 @@ app.get('/api/messages/window/:id', auth, enforceSessionVersion, async (req, res
   const hasTrigger = rows.some((r) => Number(r.id) === triggerId);
   if (!hasTrigger) return res.status(404).json({ error: 'not_found' });
   res.json(rows);
-});
+}));
 
 async function resolveAccessibleUpload({ userId, userDb, uploadId }) {
   const { rows } = await pool.query(`
@@ -1276,23 +1289,23 @@ app.post('/api/upload-image', auth, enforceSessionVersion, uploadSingleImage, as
   res.json({ uploadId: result.uploadId });
 }));
 
-app.get('/api/uploads/:id', auth, enforceSessionVersion, async (req, res) => {
-  const uploadId = Number(req.params.id);
-  if (!Number.isFinite(uploadId) || uploadId <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.get('/api/uploads/:id', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
+  const uploadId = parsePositiveId(req.params.id, 'id');
   const u = await resolveAccessibleUpload({ userId: req.user.sub, userDb: req.userDb, uploadId });
   if (!u) return res.status(404).end();
   res.setHeader('Content-Type', u.content_type);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   fs.createReadStream(path.join(uploadsDir, u.storage_name)).pipe(res);
-});
+}));
 
 
-app.get('/api/notifications', auth, enforceSessionVersion, async (req, res) => {
+app.get('/api/notifications', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
   const limit = Math.max(1, Math.min(100, Number(req.query.limit || 60)));
   const { rows } = await pool.query(`
     SELECT n.id, n.message_id, n.kind, n.channel_id, n.dm_peer_id, n.created_at,
            m.body,
            m.author_id,
+           m.dm_peer_id AS message_dm_peer_id,
            au.username AS author_username,
            au.display_name AS author_display_name
     FROM notifications n
@@ -1306,25 +1319,23 @@ app.get('/api/notifications', auth, enforceSessionVersion, async (req, res) => {
   res.json(visibleRows.map((r) => ({
     id: Number(r.id),
     messageId: Number(r.message_id),
-    mode: r.dm_peer_id ? 'dm' : 'channel',
+    mode: r.message_dm_peer_id ? 'dm' : 'channel',
     channelId: r.channel_id ? Number(r.channel_id) : null,
-    dmPeerId: r.dm_peer_id ? Number(r.dm_peer_id) : null,
+    dmPeerId: r.message_dm_peer_id ? (Number(r.author_id) === Number(req.user.sub) ? Number(r.message_dm_peer_id) : Number(r.author_id)) : null,
     createdAt: r.created_at,
     title: r.kind === 'dm' ? `DM from ${r.author_display_name || r.author_username}` : `Ping from ${r.author_display_name || r.author_username}`,
     preview: String(r.body || '').slice(0, 140) || '(attachment)'
   })));
-});
+}));
 
-app.delete('/api/notifications/:id', auth, enforceSessionVersion, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.delete('/api/notifications/:id', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
   await pool.query('DELETE FROM notifications WHERE id = $1 AND user_id = $2', [id, req.user.sub]);
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+app.get('/api/messages/:id', auth, enforceSessionVersion, asyncRoute(async (req, res) => {
+  const id = parsePositiveId(req.params.id, 'id');
   const { rows } = await pool.query('SELECT id, author_id, channel_id, dm_peer_id FROM messages WHERE id = $1', [id]);
   const m = rows[0];
   if (!m) return res.status(404).json({ error: 'not_found' });
@@ -1337,6 +1348,14 @@ app.get('/api/messages/:id', auth, enforceSessionVersion, async (req, res) => {
   if (Number(m.author_id) !== me && Number(m.dm_peer_id) !== me) return res.status(403).json({ error: 'forbidden' });
   const peer = Number(m.author_id) === me ? Number(m.dm_peer_id) : Number(m.author_id);
   res.json({ id: Number(m.id), channelId: null, dmPeerId: peer });
+}));
+
+
+app.use((err, _req, res, _next) => {
+  if (res.headersSent) return;
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.code });
+  console.error('request error', err?.message || err);
+  return res.status(500).json({ error: 'internal_error' });
 });
 
 
@@ -1381,7 +1400,7 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  if (ensureSocketAuthorizedForSend(ws)) ws.send(JSON.stringify({ type: 'hello' }));
+  if (await ensureSocketAuthorizedForSend(ws, { validateSocketAuthState })) ws.send(JSON.stringify({ type: 'hello' }));
 
   ws.on('message', (raw) => {
     if (!ws.userId) return;
