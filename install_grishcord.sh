@@ -105,8 +105,7 @@ provision_repo_checkout() {
   local default_target="/home/grishcord/grishcord"
   local target source_mode source archive_url
 
-  warn "Grishcord repo root was not found automatically."
-  target="${APP_DIR:-$(prompt 'Where should Grishcord be located?' "$default_target")}"
+  target="${APP_DIR:-$default_target}"
   mkdir -p "$target"
 
   if is_repo_dir "$target"; then
@@ -116,6 +115,7 @@ provision_repo_checkout() {
     return 0
   fi
 
+  warn "No Grishcord repo detected at $target; preparing source checkout."
   source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'git')"
   case "$source_mode" in
     local-archive)
@@ -173,31 +173,23 @@ provision_repo_checkout() {
 }
 
 resolve_app_dir() {
-  local script_dir pwd_dir home_dir candidate chosen default_target
+  local script_dir pwd_dir home_dir candidate default_target
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   pwd_dir="$(pwd)"
   home_dir="${HOME:-}/grishcord"
   default_target="/home/grishcord/grishcord"
 
+  APP_DIR="$default_target"
   for candidate in "$script_dir" "$pwd_dir" "$home_dir" "$default_target"; do
     [[ -n "$candidate" ]] || continue
     if is_repo_dir "$candidate"; then
       APP_DIR="$candidate"
-      ENV_FILE="$APP_DIR/.env"
-      INSTALL_ENV_FILE="$APP_DIR/.install.env"
       break
     fi
   done
 
-  chosen="$(prompt 'Where should Grishcord be located?' "${APP_DIR:-$default_target}")"
-  if is_repo_dir "$chosen"; then
-    APP_DIR="$chosen"
-    ENV_FILE="$APP_DIR/.env"
-    INSTALL_ENV_FILE="$APP_DIR/.install.env"
-    return 0
-  fi
-
-  provision_repo_checkout
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
 }
 
 load_install_env(){ load_data_env_file "$INSTALL_ENV_FILE"; }
@@ -255,19 +247,64 @@ normalize_hostname() {
   printf '%s' "$h"
 }
 
-directory_has_files() {
-  local dir="$1"
-  [[ -d "$dir" ]] || return 1
-  find "$dir" -mindepth 1 -maxdepth 1 | read -r _
+inspect_postgres_data_dir() {
+  local dir="$DATA_ROOT/postgres" entries
+
+  if [[ ! -e "$dir" ]]; then
+    printf 'missing'
+    return 0
+  fi
+
+  if [[ ! -d "$dir" ]]; then
+    printf 'invalid'
+    return 0
+  fi
+
+  if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+    printf 'unreadable'
+    return 0
+  fi
+
+  entries="$(find "$dir" -mindepth 1 -maxdepth 1 -print 2>/tmp/grishcord-data-root-inspect.err || true)"
+  if [[ -s /tmp/grishcord-data-root-inspect.err ]]; then
+    if grep -qi 'permission denied' /tmp/grishcord-data-root-inspect.err; then
+      rm -f /tmp/grishcord-data-root-inspect.err
+      printf 'unreadable'
+      return 0
+    fi
+    rm -f /tmp/grishcord-data-root-inspect.err
+    printf 'error'
+    return 0
+  fi
+  rm -f /tmp/grishcord-data-root-inspect.err
+
+  if [[ -z "${entries//[[:space:]]/}" ]]; then
+    printf 'empty'
+  else
+    printf 'populated'
+  fi
 }
 
-db_filesystem_looks_existing() {
-  directory_has_files "$DATA_ROOT/postgres"
+ensure_existing_db_credentials() {
+  local db_user db_name current_db_pass
+  db_user="$(get_env_key POSTGRES_USER || true)"
+  db_name="$(get_env_key POSTGRES_DB || true)"
+  db_user="${db_user:-grishcord}"
+  db_name="${db_name:-grishcord}"
+
+  current_db_pass="$(get_env_key POSTGRES_PASSWORD || true)"
+  if [[ -z "${current_db_pass// }" ]] || is_placeholder_like "$current_db_pass"; then
+    current_db_pass="$(prompt_secret 'Existing Postgres password (required for existing DB)')"
+    [[ -n "${current_db_pass// }" ]] || { err "Existing Postgres password is required for existing DB verification."; exit 1; }
+  fi
+
+  set_env_key POSTGRES_PASSWORD "$current_db_pass"
+  set_env_key DATABASE_URL "postgres://${db_user}:${current_db_pass}@postgres:5432/${db_name}"
 }
 
 configure_env_wizard() {
   local current_site current_base current_admin current_display current_db_pass current_jwt current_bootstrap
-  local site_input site_host postgres_password db_user db_name data_root_input
+  local site_input site_host postgres_password db_user db_name
 
   current_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
   current_base="$(get_env_key PUBLIC_BASE_URL || true)"
@@ -292,8 +329,7 @@ configure_env_wizard() {
     exit 1
   fi
 
-  postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current or auto-generate)')"
-  if [[ -z "${postgres_password// }" ]]; then
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
     if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
       postgres_password="$current_db_pass"
       log "Keeping existing POSTGRES_PASSWORD from .env"
@@ -302,12 +338,23 @@ configure_env_wizard() {
       err "Provide the existing Postgres password so the installer can safely reuse the DB."
       exit 1
     else
-      postgres_password="$(generate_secure_hex 32)"
-      log "Generated secure POSTGRES_PASSWORD"
+      err "Existing DB install requires a valid POSTGRES_PASSWORD in $ENV_FILE."
+      exit 1
+    fi
+  else
+    postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current or auto-generate)')"
+    if [[ -z "${postgres_password// }" ]]; then
+      if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
+        postgres_password="$current_db_pass"
+        log "Keeping existing POSTGRES_PASSWORD from .env"
+      else
+        postgres_password="$(generate_secure_hex 32)"
+        log "Generated secure POSTGRES_PASSWORD"
+      fi
     fi
   fi
 
-  if db_filesystem_looks_existing; then
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
     if [[ -z "${current_jwt// }" ]]; then
       err "Existing DB detected but JWT_SECRET is empty in $ENV_FILE. Refusing to rotate auth secrets automatically."
       exit 1
@@ -326,11 +373,6 @@ configure_env_wizard() {
       current_bootstrap="$(generate_secure_hex 32)"
       log "Generated secure BOOTSTRAP_ROOT_TOKEN"
     fi
-  fi
-
-  if [[ -z "${current_bootstrap// }" ]] || is_placeholder_like "$current_bootstrap" || [[ ${#current_bootstrap} -lt 32 ]]; then
-    current_bootstrap="$(generate_secure_hex 32)"
-    log "Generated secure BOOTSTRAP_ROOT_TOKEN"
   fi
 
   db_user="$(get_env_key POSTGRES_USER || true)"
@@ -781,16 +823,72 @@ main() {
   require_bin docker
   require_bin curl
   resolve_app_dir
-  log "Using repo directory: $APP_DIR"
+  APP_DIR="$(prompt 'Where should Grishcord be located?' "$APP_DIR")"
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
 
   load_install_env
-  ensure_env_file
-  configure_env_wizard
+  DATA_ROOT="$(prompt 'Where should Grishcord DB be located?' "${DATA_ROOT:-/mnt/grishcord/}")"
+  DATA_ROOT="${DATA_ROOT%/}"
+  [[ -n "${DATA_ROOT// }" ]] || { err "DB location cannot be empty."; exit 1; }
 
-  if [[ -n "$(get_env_key HOST_DATA_ROOT || true)" ]]; then
-    DATA_ROOT="$(get_env_key HOST_DATA_ROOT)"
+  provision_repo_checkout
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
+  log "Using repo directory: $APP_DIR"
+
+  ensure_env_file
+  set_env_key HOST_DATA_ROOT "$DATA_ROOT"
+
+  local db_dir_state
+  db_dir_state="$(inspect_postgres_data_dir)"
+
+  case "$db_dir_state" in
+    populated)
+      INSTALL_MODE="existing"
+      EXISTING_ADMIN_DB="Y"
+      ensure_existing_db_credentials
+
+      log "Existing DB files detected under $DATA_ROOT/postgres; validating existing install state."
+      docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d postgres
+      if ! wait_postgres_ready 60; then
+        err "Postgres did not become ready while checking existing DB state."
+        exit 1
+      fi
+      detect_existing_admin_from_db
+
+      if [[ "$INSTALL_MODE" == "existing" ]]; then
+        ROOT_ADMIN_USERNAME="$DETECTED_ADMIN_USERNAME"
+        ROOT_ADMIN_DISPLAY_NAME="$DETECTED_ADMIN_USERNAME"
+        set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
+        log "Detected existing admin account: $ROOT_ADMIN_USERNAME"
+        prompt_existing_admin_password
+      fi
+      ;;
+    missing|empty)
+      ;;
+    unreadable)
+      err "Cannot determine install mode: $DATA_ROOT/postgres exists but is not readable by current user."
+      err "Refusing to assume fresh install. Fix permissions or run installer with sufficient privileges."
+      exit 1
+      ;;
+    invalid)
+      err "Cannot determine install mode: $DATA_ROOT/postgres exists but is not a directory."
+      exit 1
+      ;;
+    error|*)
+      err "Failed to inspect $DATA_ROOT/postgres. Refusing to continue to avoid misclassifying an existing install."
+      exit 1
+      ;;
+  esac
+
+  if [[ "$INSTALL_MODE" != "existing" ]]; then
+    INSTALL_MODE="fresh"
+    EXISTING_ADMIN_DB="N"
+    prompt_fresh_admin_setup
   fi
 
+  configure_env_wizard
   preflight_compose_sanity
 
   if db_filesystem_looks_existing; then
@@ -829,8 +927,7 @@ main() {
   fi
 
   if [[ "$INSTALL_MODE" == "existing" ]]; then
-    log "Skipping root bootstrap because existing DB admin was auto-detected."
-    prompt_existing_admin_password
+    log "Skipping root bootstrap because existing DB admin was auto-detected and verified."
   else
     bootstrap_root_admin "$local_api_base"
     login_admin "$local_api_base"

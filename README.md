@@ -16,8 +16,8 @@ The installer asks for:
 - Public hostname (used for `CADDY_SITE_ADDRESS`, `PUBLIC_BASE_URL`, `CORS_ORIGINS`)
 - Postgres password (or blank to keep/generate securely)
 - Existing DB/admin is detected automatically from DB state (no manual yes/no prompt)
-- Installer fails clearly when a DB path is present but unusable/corrupt or not a valid Grishcord schema
-- Existing installs: installer prompts for detected admin password and verifies against stored DB hash before continuing (wrong password retries)
+- Installer fails clearly when a DB path is permission-restricted/unusable/corrupt or not a valid Grishcord schema
+- Existing installs: installer prompts for detected admin password and verifies against stored DB hash before continuing to full stack startup (wrong password retries)
 - Fresh installs: installer prompts for new admin username/display name/password
 - Optional AI enablement (Ollama + bot account)
 - If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts

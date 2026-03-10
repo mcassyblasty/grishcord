@@ -30,6 +30,27 @@ assert_contains() {
   [[ "$hay" == *"$needle"* ]] || { echo "$msg" >&2; exit 1; }
 }
 
+# --- DB data-dir state model: missing / empty / populated / unreadable ---
+echo "[flow] DB data-dir state model"
+
+rm -rf "$DATA_ROOT/postgres"
+[[ "$(inspect_postgres_data_dir)" == "missing" ]] || { echo "missing db dir should be classified as missing" >&2; exit 1; }
+
+mkdir -p "$DATA_ROOT/postgres"
+[[ "$(inspect_postgres_data_dir)" == "empty" ]] || { echo "empty db dir should be classified as empty" >&2; exit 1; }
+
+echo "PG_VERSION" > "$DATA_ROOT/postgres/PG_VERSION"
+[[ "$(inspect_postgres_data_dir)" == "populated" ]] || { echo "populated db dir should be classified as populated" >&2; exit 1; }
+
+find() {
+  printf 'find: %s: Permission denied
+' "$1" >&2
+  return 1
+}
+state_unreadable="$(inspect_postgres_data_dir)"
+unset -f find
+[[ "$state_unreadable" == "unreadable" ]] || { echo "permission-restricted db dir should be classified as unreadable" >&2; exit 1; }
+
 # --- Fresh install path: empty db dir => prompt for new admin setup ---
 echo "[flow] fresh-install admin prompt path"
 rm -rf "$DATA_ROOT/postgres"
@@ -134,6 +155,13 @@ set -e
 [[ $fail_rc -ne 0 ]] || { echo "unusable DB detection should fail" >&2; exit 1; }
 assert_contains "$fail_out" "Failed to inspect existing DB" "missing corrupt-db failure guidance"
 assert_contains "$fail_out" "Check DB path integrity and Postgres credentials" "missing operator guidance for corrupt-db"
+
+# --- Ensure repo/db path prompts are not duplicated ---
+echo "[flow] single repo/db path prompts"
+repo_prompt_count="$(rg -n "Where should Grishcord be located\?" "$ROOT_DIR/install_grishcord.sh" | wc -l | tr -d ' ')"
+db_prompt_count="$(rg -n "Where should Grishcord DB be located\?" "$ROOT_DIR/install_grishcord.sh" | wc -l | tr -d ' ')"
+[[ "$repo_prompt_count" == "1" ]] || { echo "repo path prompt should appear exactly once" >&2; exit 1; }
+[[ "$db_prompt_count" == "1" ]] || { echo "DB path prompt should appear exactly once" >&2; exit 1; }
 
 # --- Ensure obsolete manual prompt text is gone ---
 echo "[flow] obsolete prompt removed"
