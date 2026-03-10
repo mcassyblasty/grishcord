@@ -4,6 +4,10 @@ set -Eeuo pipefail
 APP_DIR=""
 ENV_FILE=""
 INSTALL_ENV_FILE=""
+DATA_ROOT="/mnt/grishcord"
+INSTALL_MODE="fresh"
+DETECTED_ADMIN_USERNAME=""
+DETECTED_ADMIN_USERS=()
 COOKIE_JAR="$(mktemp /tmp/grishcord-install-cookie.XXXXXX)"
 AI_SETUP_STATUS="not_selected"
 trap 'rm -f "$COOKIE_JAR"' EXIT
@@ -26,7 +30,7 @@ load_data_env_file() {
     key="${key//[[:space:]]/}"
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
     case "$key" in
-      ROOT_ADMIN_USERNAME|ROOT_ADMIN_DISPLAY_NAME|EXISTING_ADMIN_DB|ENABLE_AI|BOT_USERNAME|BOT_DISPLAY_NAME|BOT_COLOR)
+      ROOT_ADMIN_USERNAME|ROOT_ADMIN_DISPLAY_NAME|EXISTING_ADMIN_DB|ENABLE_AI|BOT_USERNAME|BOT_DISPLAY_NAME|BOT_COLOR|DATA_ROOT|INSTALL_MODE|DETECTED_ADMIN_USERNAME)
         printf -v "$key" '%s' "$(sanitize_env_value "$value")"
         ;;
     esac
@@ -98,11 +102,10 @@ extract_archive_flattened() {
 }
 
 provision_repo_checkout() {
-  local default_target="$PWD/grishcord"
+  local default_target="/home/grishcord/grishcord"
   local target source_mode source archive_url
 
-  warn "Grishcord repo root was not found automatically."
-  target="$(prompt 'Where should Grishcord be located?' "$default_target")"
+  target="${APP_DIR:-$default_target}"
   mkdir -p "$target"
 
   if is_repo_dir "$target"; then
@@ -112,7 +115,8 @@ provision_repo_checkout() {
     return 0
   fi
 
-  source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'curl')"
+  warn "No Grishcord repo detected at $target; preparing source checkout."
+  source_mode="$(prompt 'Repo source (git/wget/curl/local-archive)' 'git')"
   case "$source_mode" in
     local-archive)
       source="$(prompt 'Path to Grishcord archive (.zip or .tar.gz)' "$PWD/grishcord.tar.gz")"
@@ -169,22 +173,23 @@ provision_repo_checkout() {
 }
 
 resolve_app_dir() {
-  local script_dir pwd_dir home_dir candidate
+  local script_dir pwd_dir home_dir candidate default_target
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   pwd_dir="$(pwd)"
   home_dir="${HOME:-}/grishcord"
+  default_target="/home/grishcord/grishcord"
 
-  for candidate in "$script_dir" "$pwd_dir" "$home_dir"; do
+  APP_DIR="$default_target"
+  for candidate in "$script_dir" "$pwd_dir" "$home_dir" "$default_target"; do
     [[ -n "$candidate" ]] || continue
     if is_repo_dir "$candidate"; then
       APP_DIR="$candidate"
-      ENV_FILE="$APP_DIR/.env"
-      INSTALL_ENV_FILE="$APP_DIR/.install.env"
-      return 0
+      break
     fi
   done
 
-  provision_repo_checkout
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
 }
 
 load_install_env(){ load_data_env_file "$INSTALL_ENV_FILE"; }
@@ -242,9 +247,64 @@ normalize_hostname() {
   printf '%s' "$h"
 }
 
+inspect_postgres_data_dir() {
+  local dir="$DATA_ROOT/postgres" entries
+
+  if [[ ! -e "$dir" ]]; then
+    printf 'missing'
+    return 0
+  fi
+
+  if [[ ! -d "$dir" ]]; then
+    printf 'invalid'
+    return 0
+  fi
+
+  if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+    printf 'unreadable'
+    return 0
+  fi
+
+  entries="$(find "$dir" -mindepth 1 -maxdepth 1 -print 2>/tmp/grishcord-data-root-inspect.err || true)"
+  if [[ -s /tmp/grishcord-data-root-inspect.err ]]; then
+    if grep -qi 'permission denied' /tmp/grishcord-data-root-inspect.err; then
+      rm -f /tmp/grishcord-data-root-inspect.err
+      printf 'unreadable'
+      return 0
+    fi
+    rm -f /tmp/grishcord-data-root-inspect.err
+    printf 'error'
+    return 0
+  fi
+  rm -f /tmp/grishcord-data-root-inspect.err
+
+  if [[ -z "${entries//[[:space:]]/}" ]]; then
+    printf 'empty'
+  else
+    printf 'populated'
+  fi
+}
+
+ensure_existing_db_credentials() {
+  local db_user db_name current_db_pass
+  db_user="$(get_env_key POSTGRES_USER || true)"
+  db_name="$(get_env_key POSTGRES_DB || true)"
+  db_user="${db_user:-grishcord}"
+  db_name="${db_name:-grishcord}"
+
+  current_db_pass="$(get_env_key POSTGRES_PASSWORD || true)"
+  if [[ -z "${current_db_pass// }" ]] || is_placeholder_like "$current_db_pass"; then
+    current_db_pass="$(prompt_secret 'Existing Postgres password (required for existing DB)')"
+    [[ -n "${current_db_pass// }" ]] || { err "Existing Postgres password is required for existing DB verification."; exit 1; }
+  fi
+
+  set_env_key POSTGRES_PASSWORD "$current_db_pass"
+  set_env_key DATABASE_URL "postgres://${db_user}:${current_db_pass}@postgres:5432/${db_name}"
+}
+
 configure_env_wizard() {
-  local current_site current_base current_admin current_display current_db_pass current_jwt
-  local site_input site_host admin_username admin_display admin_password postgres_password db_user db_name
+  local current_site current_base current_admin current_display current_db_pass current_jwt current_bootstrap
+  local site_input site_host postgres_password db_user db_name
 
   current_site="$(get_env_key CADDY_SITE_ADDRESS || true)"
   current_base="$(get_env_key PUBLIC_BASE_URL || true)"
@@ -252,6 +312,7 @@ configure_env_wizard() {
   current_display="${ROOT_ADMIN_DISPLAY_NAME:-${current_admin:-Root Admin}}"
   current_db_pass="$(get_env_key POSTGRES_PASSWORD || true)"
   current_jwt="$(get_env_key JWT_SECRET || true)"
+  current_bootstrap="$(get_env_key BOOTSTRAP_ROOT_TOKEN || true)"
 
   if [[ -z "${current_site// }" && -n "${current_base// }" ]]; then
     current_site="$(normalize_hostname "$current_base")"
@@ -264,25 +325,46 @@ configure_env_wizard() {
     exit 1
   fi
 
-  admin_username="$(prompt 'Admin username' "${ROOT_ADMIN_USERNAME:-${current_admin:-rootadmin}}")"
-  admin_display="$(prompt 'Admin display name' "$current_display")"
-  admin_password="$(prompt_secret 'Admin password')"
-  [[ -n "${admin_password// }" ]] || { err "Admin password cannot be blank."; exit 1; }
-
-  postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current or auto-generate)')"
-  if [[ -z "${postgres_password// }" ]]; then
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
     if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
       postgres_password="$current_db_pass"
       log "Keeping existing POSTGRES_PASSWORD from .env"
     else
-      postgres_password="$(generate_secure_hex 32)"
-      log "Generated secure POSTGRES_PASSWORD"
+      err "Existing DB install requires a valid POSTGRES_PASSWORD in $ENV_FILE."
+      exit 1
+    fi
+  else
+    postgres_password="$(prompt_secret 'Postgres password (leave blank to keep current or auto-generate)')"
+    if [[ -z "${postgres_password// }" ]]; then
+      if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
+        postgres_password="$current_db_pass"
+        log "Keeping existing POSTGRES_PASSWORD from .env"
+      else
+        postgres_password="$(generate_secure_hex 32)"
+        log "Generated secure POSTGRES_PASSWORD"
+      fi
     fi
   fi
 
-  if [[ -z "${current_jwt// }" ]] || is_placeholder_like "$current_jwt" || [[ ${#current_jwt} -lt 32 ]]; then
-    current_jwt="$(generate_secure_hex 32)"
-    log "Generated secure JWT_SECRET"
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
+    if [[ -z "${current_jwt// }" ]]; then
+      err "Existing DB detected but JWT_SECRET is empty in $ENV_FILE. Refusing to rotate auth secrets automatically."
+      exit 1
+    fi
+    if [[ -z "${current_bootstrap// }" ]]; then
+      current_bootstrap="$(generate_secure_hex 32)"
+      log "Generated BOOTSTRAP_ROOT_TOKEN"
+    fi
+  else
+    if [[ -z "${current_jwt// }" ]] || is_placeholder_like "$current_jwt" || [[ ${#current_jwt} -lt 32 ]]; then
+      current_jwt="$(generate_secure_hex 32)"
+      log "Generated secure JWT_SECRET"
+    fi
+
+    if [[ -z "${current_bootstrap// }" ]] || is_placeholder_like "$current_bootstrap" || [[ ${#current_bootstrap} -lt 32 ]]; then
+      current_bootstrap="$(generate_secure_hex 32)"
+      log "Generated secure BOOTSTRAP_ROOT_TOKEN"
+    fi
   fi
 
   db_user="$(get_env_key POSTGRES_USER || true)"
@@ -293,14 +375,11 @@ configure_env_wizard() {
   set_env_key POSTGRES_PASSWORD "$postgres_password"
   set_env_key DATABASE_URL "postgres://${db_user}:${postgres_password}@postgres:5432/${db_name}"
   set_env_key JWT_SECRET "$current_jwt"
-  set_env_key ADMIN_USERNAME "$admin_username"
+  set_env_key BOOTSTRAP_ROOT_TOKEN "$current_bootstrap"
   set_env_key PUBLIC_BASE_URL "https://${site_host}"
   set_env_key CORS_ORIGINS "https://${site_host}"
   set_env_key CADDY_SITE_ADDRESS "$site_host"
-
-  ROOT_ADMIN_USERNAME="$admin_username"
-  ROOT_ADMIN_DISPLAY_NAME="$admin_display"
-  ROOT_ADMIN_PASSWORD="$admin_password"
+  set_env_key HOST_DATA_ROOT "$DATA_ROOT"
 }
 
 validate_required_env() {
@@ -336,7 +415,7 @@ normalize_database_url() {
 }
 
 ensure_host_bind_mount_dirs() {
-  local dirs=(/mnt/grishcord/postgres /mnt/grishcord/uploads)
+  local dirs=("$DATA_ROOT/postgres" "$DATA_ROOT/uploads")
   local d
   for d in "${dirs[@]}"; do
     if [[ ! -d "$d" ]]; then
@@ -361,6 +440,9 @@ write_install_env() {
     printf 'ROOT_ADMIN_USERNAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_USERNAME")"
     printf 'ROOT_ADMIN_DISPLAY_NAME=%s\n' "$(sanitize_env_value "$ROOT_ADMIN_DISPLAY_NAME")"
     printf 'EXISTING_ADMIN_DB=%s\n' "$(sanitize_env_value "$EXISTING_ADMIN_DB")"
+    printf 'INSTALL_MODE=%s\n' "$(sanitize_env_value "$INSTALL_MODE")"
+    printf 'DETECTED_ADMIN_USERNAME=%s\n' "$(sanitize_env_value "$DETECTED_ADMIN_USERNAME")"
+    printf 'DATA_ROOT=%s\n' "$(sanitize_env_value "$DATA_ROOT")"
     printf 'ENABLE_AI=%s\n' "$(sanitize_env_value "$ENABLE_AI")"
     printf 'BOT_USERNAME=%s\n' "$(sanitize_env_value "${BOT_USERNAME:-}")"
     printf 'BOT_DISPLAY_NAME=%s\n' "$(sanitize_env_value "${BOT_DISPLAY_NAME:-}")"
@@ -376,6 +458,169 @@ wait_http_ok() {
     sleep 2
   done
   return 1
+}
+
+wait_postgres_ready() {
+  local tries="${1:-60}" i
+  for ((i=1; i<=tries; i+=1)); do
+    if docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" exec -T postgres sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1'; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+list_existing_admins_from_db() {
+  local sql out_file
+  sql="SELECT username FROM users WHERE disabled=false AND (is_admin=true OR username='$(sanitize_env_value "$(get_env_key ADMIN_USERNAME || true)")') ORDER BY (username='$(sanitize_env_value "$(get_env_key ADMIN_USERNAME || true)")') DESC, username ASC;"
+  out_file="$(mktemp /tmp/grish-admin-users.XXXXXX)"
+  if ! docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(get_env_key POSTGRES_USER || true)" -d "$(get_env_key POSTGRES_DB || true)" -Atc "$sql" >"$out_file" 2>/tmp/grishcord-db-detect.err; then
+    local err_out
+    err_out="$(cat /tmp/grishcord-db-detect.err 2>/dev/null || true)"
+    rm -f "$out_file" /tmp/grishcord-db-detect.err
+    err "Failed to inspect existing DB in $DATA_ROOT/postgres."
+    err "Details: $err_out"
+    err "Check DB path integrity and Postgres credentials in $ENV_FILE."
+    exit 1
+  fi
+  rm -f /tmp/grishcord-db-detect.err
+  mapfile -t DETECTED_ADMIN_USERS <"$out_file"
+  rm -f "$out_file"
+}
+
+detect_existing_admin_from_db() {
+  local count_sql users_count
+
+  count_sql='SELECT COUNT(*)::bigint FROM users;'
+  users_count="$(docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(get_env_key POSTGRES_USER || true)" -d "$(get_env_key POSTGRES_DB || true)" -Atc "$count_sql" 2>/tmp/grishcord-db-detect.err || true)"
+  if [[ -s /tmp/grishcord-db-detect.err ]]; then
+    local err_out
+    err_out="$(cat /tmp/grishcord-db-detect.err)"
+    rm -f /tmp/grishcord-db-detect.err
+    err "Failed to inspect existing DB in $DATA_ROOT/postgres."
+    err "Details: $err_out"
+    err "Check DB path integrity and Postgres credentials in $ENV_FILE."
+    exit 1
+  fi
+  rm -f /tmp/grishcord-db-detect.err
+
+  users_count="${users_count//[[:space:]]/}"
+  if [[ -z "$users_count" || "$users_count" == "0" ]]; then
+    INSTALL_MODE="fresh"
+    DETECTED_ADMIN_USERNAME=""
+    DETECTED_ADMIN_USERS=()
+    return 0
+  fi
+
+  list_existing_admins_from_db
+  if [[ ${#DETECTED_ADMIN_USERS[@]} -eq 0 ]]; then
+    err "Existing DB contains users but no active admin account was found."
+    err "Refusing to continue automatically to avoid damaging existing auth state."
+    exit 1
+  fi
+
+  INSTALL_MODE="existing"
+  DETECTED_ADMIN_USERNAME="${DETECTED_ADMIN_USERS[0]}"
+}
+
+prompt_fresh_admin_setup() {
+  local current_admin current_display
+  current_admin="$(get_env_key ADMIN_USERNAME || true)"
+  current_display="${ROOT_ADMIN_DISPLAY_NAME:-${current_admin:-Root Admin}}"
+  ROOT_ADMIN_USERNAME="$(prompt 'Admin username' "${ROOT_ADMIN_USERNAME:-${current_admin:-rootadmin}}")"
+  ROOT_ADMIN_DISPLAY_NAME="$(prompt 'Admin display name' "$current_display")"
+  ROOT_ADMIN_PASSWORD="$(prompt_secret 'Admin password')"
+  [[ -n "${ROOT_ADMIN_PASSWORD// }" ]] || { err "Admin password cannot be blank."; exit 1; }
+  set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
+}
+
+select_existing_admin_username() {
+  if [[ ${#DETECTED_ADMIN_USERS[@]} -le 1 ]]; then
+    DETECTED_ADMIN_USERNAME="${DETECTED_ADMIN_USERS[0]}"
+    return 0
+  fi
+
+  log "Multiple active admin accounts were detected in the existing DB."
+  local i choice
+  for ((i=0; i<${#DETECTED_ADMIN_USERS[@]}; i+=1)); do
+    printf '  %d) %s\n' "$((i+1))" "${DETECTED_ADMIN_USERS[$i]}"
+  done
+
+  while true; do
+    choice="$(prompt 'Select admin account number for verification' '1')"
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#DETECTED_ADMIN_USERS[@]} )); then
+      DETECTED_ADMIN_USERNAME="${DETECTED_ADMIN_USERS[$((choice-1))]}"
+      return 0
+    fi
+    warn "Invalid selection. Enter a number between 1 and ${#DETECTED_ADMIN_USERS[@]}."
+  done
+}
+
+verify_admin_password_with_db() {
+  local username="$1" password="$2"
+  local rc=0
+  if ! docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" run --rm --no-deps -T     -e VERIFY_USERNAME="$username"     -e VERIFY_PASSWORD="$password"     backend node -e "const { Client } = require('pg'); const bcrypt = require('bcryptjs'); (async () => { const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const r = await client.query('SELECT password_hash, disabled FROM users WHERE username = $1 LIMIT 1', [process.env.VERIFY_USERNAME]); const row = r.rows[0]; if (!row || row.disabled) { process.exit(2); } const ok = await bcrypt.compare(process.env.VERIFY_PASSWORD || '', row.password_hash || ''); process.exit(ok ? 0 : 3); } catch (e) { console.error(e && e.message ? e.message : String(e)); process.exit(4); } finally { await client.end().catch(() => {}); } })();" >/tmp/grish-admin-verify.out 2>/tmp/grish-admin-verify.err; then
+    rc=$?
+  fi
+
+  case "$rc" in
+    0) rm -f /tmp/grish-admin-verify.out /tmp/grish-admin-verify.err; return 0 ;;
+    3) rm -f /tmp/grish-admin-verify.out /tmp/grish-admin-verify.err; return 1 ;;
+    2)
+      warn "Selected admin account no longer eligible for verification. Re-detecting admins."
+      rm -f /tmp/grish-admin-verify.out /tmp/grish-admin-verify.err
+      return 2
+      ;;
+    *)
+      local detail
+      detail="$(cat /tmp/grish-admin-verify.err 2>/dev/null || true)"
+      rm -f /tmp/grish-admin-verify.out /tmp/grish-admin-verify.err
+      err "Failed to verify existing admin password against DB state."
+      [[ -n "${detail// }" ]] && err "Details: $detail"
+      return 4
+      ;;
+  esac
+}
+
+prompt_existing_admin_password() {
+  local attempts ans verify_rc
+  select_existing_admin_username
+  ROOT_ADMIN_USERNAME="$DETECTED_ADMIN_USERNAME"
+  ROOT_ADMIN_DISPLAY_NAME="$DETECTED_ADMIN_USERNAME"
+  attempts=0
+  while true; do
+    attempts=$((attempts+1))
+    ROOT_ADMIN_PASSWORD="$(prompt_secret "Existing admin password for $ROOT_ADMIN_USERNAME")"
+    [[ -n "${ROOT_ADMIN_PASSWORD// }" ]] || { warn "Password cannot be blank."; continue; }
+
+    if verify_admin_password_with_db "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_PASSWORD"; then
+      log "Existing admin credentials verified."
+      return 0
+    fi
+    verify_rc=$?
+
+    if [[ "$verify_rc" == "2" ]]; then
+      detect_existing_admin_from_db
+      select_existing_admin_username
+      ROOT_ADMIN_USERNAME="$DETECTED_ADMIN_USERNAME"
+      ROOT_ADMIN_DISPLAY_NAME="$DETECTED_ADMIN_USERNAME"
+      continue
+    fi
+    if [[ "$verify_rc" == "4" ]]; then
+      err "Cannot continue without successful admin verification."
+      exit 1
+    fi
+
+    warn "Admin password verification failed."
+    read -r -p "Try again? [Y/n]: " ans
+    ans="${ans:-Y}"
+    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+      err "Aborted by operator after failed admin password verification."
+      exit 1
+    fi
+    [[ $attempts -lt 20 ]] || { err "Too many failed password attempts."; exit 1; }
+  done
 }
 
 print_startup_diagnostics() {
@@ -397,7 +642,14 @@ bootstrap_root_admin() {
   payload=$(printf '{"username":"%s","displayName":"%s","password":"%s"}' "$ROOT_ADMIN_USERNAME" "$ROOT_ADMIN_DISPLAY_NAME" "$ROOT_ADMIN_PASSWORD")
   local status resp
   resp="$(mktemp /tmp/grish-bootstrap.XXXXXX.json)"
-  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
+  local bootstrap_token
+  bootstrap_token="$(get_env_key BOOTSTRAP_ROOT_TOKEN || true)"
+  if [[ -z "${bootstrap_token// }" ]]; then
+    err "BOOTSTRAP_ROOT_TOKEN is required for initial root bootstrap."
+    exit 1
+  fi
+
+  status=$(curl -sS -o "$resp" -w '%{http_code}' -H 'content-type: application/json' -H "x-bootstrap-token: $bootstrap_token" -X POST "$base_url/api/bootstrap/root" -d "$payload" || true)
 
   if [[ "$status" == "200" ]]; then
     rm -f "$resp"
@@ -524,7 +776,7 @@ configure_ai() {
 
   log "AI setup selected: this will install/configure Ollama and set up GrishBot for Dockerized access."
   log "Configuring Ollama in docker mode so the bot can reach it via host.docker.internal:11434."
-  "$APP_DIR/scripts/ollamactrl.sh" install --bind-mode docker
+  "$APP_DIR/scripts/aibotctl.sh" ollama install --bind-mode docker
 
   BOT_USERNAME="$(prompt 'Bot username' "${BOT_USERNAME:-grishbot}")"
   BOT_DISPLAY_NAME="$(prompt 'Bot display name' "${BOT_DISPLAY_NAME:-Grish Bot}")"
@@ -563,14 +815,72 @@ main() {
   require_bin docker
   require_bin curl
   resolve_app_dir
-  log "Using repo directory: $APP_DIR"
+  APP_DIR="$(prompt 'Where should Grishcord be located?' "$APP_DIR")"
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
 
   load_install_env
+  DATA_ROOT="$(prompt 'Where should Grishcord DB be located?' "${DATA_ROOT:-/mnt/grishcord/}")"
+  DATA_ROOT="${DATA_ROOT%/}"
+  [[ -n "${DATA_ROOT// }" ]] || { err "DB location cannot be empty."; exit 1; }
+
+  provision_repo_checkout
+  ENV_FILE="$APP_DIR/.env"
+  INSTALL_ENV_FILE="$APP_DIR/.install.env"
+  log "Using repo directory: $APP_DIR"
+
   ensure_env_file
+  set_env_key HOST_DATA_ROOT "$DATA_ROOT"
+
+  local db_dir_state
+  db_dir_state="$(inspect_postgres_data_dir)"
+
+  case "$db_dir_state" in
+    populated)
+      INSTALL_MODE="existing"
+      EXISTING_ADMIN_DB="Y"
+      ensure_existing_db_credentials
+
+      log "Existing DB files detected under $DATA_ROOT/postgres; validating existing install state."
+      docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d postgres
+      if ! wait_postgres_ready 60; then
+        err "Postgres did not become ready while checking existing DB state."
+        exit 1
+      fi
+      detect_existing_admin_from_db
+
+      if [[ "$INSTALL_MODE" == "existing" ]]; then
+        ROOT_ADMIN_USERNAME="$DETECTED_ADMIN_USERNAME"
+        ROOT_ADMIN_DISPLAY_NAME="$DETECTED_ADMIN_USERNAME"
+        set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
+        log "Detected existing admin account: $ROOT_ADMIN_USERNAME"
+        prompt_existing_admin_password
+      fi
+      ;;
+    missing|empty)
+      ;;
+    unreadable)
+      err "Cannot determine install mode: $DATA_ROOT/postgres exists but is not readable by current user."
+      err "Refusing to assume fresh install. Fix permissions or run installer with sufficient privileges."
+      exit 1
+      ;;
+    invalid)
+      err "Cannot determine install mode: $DATA_ROOT/postgres exists but is not a directory."
+      exit 1
+      ;;
+    error|*)
+      err "Failed to inspect $DATA_ROOT/postgres. Refusing to continue to avoid misclassifying an existing install."
+      exit 1
+      ;;
+  esac
+
+  if [[ "$INSTALL_MODE" != "existing" ]]; then
+    INSTALL_MODE="fresh"
+    EXISTING_ADMIN_DB="N"
+    prompt_fresh_admin_setup
+  fi
+
   configure_env_wizard
-
-  EXISTING_ADMIN_DB="$(prompt 'Is there already an admin account in the existing DB? (y/N)' "${EXISTING_ADMIN_DB:-N}")"
-
   preflight_compose_sanity
 
   log "Starting/upgrading core compose services"
@@ -584,12 +894,12 @@ main() {
     exit 1
   fi
 
-  if [[ "$EXISTING_ADMIN_DB" =~ ^[Yy]$ ]]; then
-    log "Skipping root bootstrap because existing DB admin was selected."
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
+    log "Skipping root bootstrap because existing DB admin was auto-detected and verified."
   else
     bootstrap_root_admin "$local_api_base"
+    login_admin "$local_api_base"
   fi
-  login_admin "$local_api_base"
 
   configure_ai "$local_api_base"
 
@@ -600,7 +910,9 @@ main() {
 Install complete.
 - Backend health: OK
 - Admin username: $ROOT_ADMIN_USERNAME (protected by ADMIN_USERNAME server-side checks)
+- Install mode: $INSTALL_MODE
 - Existing admin DB mode: $EXISTING_ADMIN_DB
+- Data root: $DATA_ROOT
 - AI enabled: $ENABLE_AI
 - GrishBot setup status: $AI_SETUP_STATUS
 
