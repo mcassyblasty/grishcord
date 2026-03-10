@@ -2,7 +2,6 @@ const $ = (id) => document.getElementById(id);
 const state = {
   me: null,
   lastId: 0,
-  redeemId: null,
   ws: null,
   wsSubscribedChannelKey: '',
   channels: [],
@@ -1050,7 +1049,12 @@ function applyTheme(theme){
 }
 
 function setSpamEffective(level){
-  const p = spamMap[level] || spamMap[5];
+  const n = Number(level);
+  if (!Number.isFinite(n) || n <= 0) {
+    text($('spamEffective'), 'Effective: anti-spam disabled');
+    return;
+  }
+  const p = spamMap[n] || spamMap[5];
   text($('spamEffective'), `Effective: burst ${p.burst}, sustained ${p.sustained}/min, cooldown ${p.cooldown}s`);
 }
 
@@ -1800,7 +1804,7 @@ async function boot(){
       recovery: { help: 'Need a different option?', a: ['Login', 'none'], b: ['Register', 'register'] }
     };
     const cfg = modes[mode] || modes.none;
-    if (recoveryOpen) setRecoveryStage(state.redeemId ? 'reset' : 'redeem');
+    if (recoveryOpen) setRecoveryStage('redeem');
     if (help) help.textContent = cfg.help;
     if (a) { a.textContent = cfg.a[0]; a.dataset.mode = cfg.a[1]; }
     if (b) { b.textContent = cfg.b[0]; b.dataset.mode = cfg.b[1]; }
@@ -1854,8 +1858,7 @@ async function boot(){
     const btn = $('redeemBtn');
     setBusy(btn, true);
     try {
-      const r = await api('/api/recovery/redeem','POST',{token:$('recoverToken').value.trim()});
-      state.redeemId = r.redeemId;
+      await api('/api/recovery/redeem','POST',{token:$('recoverToken').value.trim()});
       setRecoveryStage('reset');
       setNotice('Token redeemed. Set new password below.', 'ok');
     } catch(err){
@@ -1868,11 +1871,11 @@ async function boot(){
     const btn = $('resetBtn');
     setBusy(btn, true);
     try {
-      if (!state.redeemId) throw new Error('invalid_token');
+      const recoveryToken = $('recoverToken').value.trim();
+      if (!recoveryToken) throw new Error('invalid_token');
       if ($('newPass').value !== $('newPassConfirm').value) throw new Error('password_mismatch');
-      await api('/api/recovery/reset','POST',{redeemId:state.redeemId,password:$('newPass').value});
+      await api('/api/recovery/reset','POST',{token:recoveryToken,password:$('newPass').value});
       setNotice('Password reset complete.', 'ok');
-      state.redeemId = null;
       $('recoverToken').value = '';
       $('newPass').value = '';
       $('newPassConfirm').value = '';
