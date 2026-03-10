@@ -39,6 +39,7 @@ echo "[smoke] validating bootstrap_root_admin failure path"
 ROOT_ADMIN_USERNAME="rootadmin"
 ROOT_ADMIN_DISPLAY_NAME="Root Admin"
 ROOT_ADMIN_PASSWORD="secret"
+set_env_key BOOTSTRAP_ROOT_TOKEN "sanity-token"
 
 curl() {
   local out_file=""

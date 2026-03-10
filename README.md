@@ -6,18 +6,19 @@ Minimal private Discord-like web app scaffold with Docker Compose and Postgres.
 - `./install_grishcord.sh` (interactive installer usable from anywhere)
 - If `git` is selected and identity is not configured, the installer guides setup for `git config --global user.name` and `user.email`.
 - Installer records update metadata in `.grishcord-install.env` so `grishcordctl.sh update-start` can update source code before rebuilding.
-- Defaults when repo root is not detected: source `curl`, repo `https://github.com/mcassyblasty/grishcord`, target `./grishcord` under current working directory.
+- Installer defaults: repo path `/home/grishcord/grishcord`, DB data root `/mnt/grishcord/`, source `git`, repo URL `https://github.com/mcassyblasty/grishcord.git`.
 - Full local bootstrap includes guided `.env` setup, admin bootstrap/login, and optional AI (Ollama + GrishBot) flow.
 
 ### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
-- If repo root is not detected: install target and repo source (git/wget/curl/local-archive)
+- Grishcord repo location, DB data root, and repo source (git/wget/curl/local-archive)
+- If `git` source: git URL
 - Public hostname (used for `CADDY_SITE_ADDRESS`, `PUBLIC_BASE_URL`, `CORS_ORIGINS`)
-- Admin username
-- Admin display name
-- Admin password (hidden input)
 - Postgres password (or blank to keep/generate securely)
-- Whether the existing DB already has an admin account (for reinstalling against existing DB data)
+- Existing DB/admin is detected automatically from DB state (no manual yes/no prompt)
+- Installer fails clearly when a DB path is present but unusable/corrupt or not a valid Grishcord schema
+- Existing installs: installer prompts for detected admin password and verifies against stored DB hash before continuing (wrong password retries)
+- Fresh installs: installer prompts for new admin username/display name/password
 - Optional AI enablement (Ollama + bot account)
 - If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
 - If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules

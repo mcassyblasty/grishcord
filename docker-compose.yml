@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /mnt/grishcord/postgres:/var/lib/postgresql/data
+      - ${HOST_DATA_ROOT:-/mnt/grishcord}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -25,13 +25,13 @@ services:
       BOOTSTRAP_ROOT_TOKEN: ${BOOTSTRAP_ROOT_TOKEN}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       COOKIE_SECURE: ${COOKIE_SECURE}
-      HOST_DATA_ROOT: /mnt/grishcord
-      UPLOADS_DIR: /mnt/grishcord/uploads
+      HOST_DATA_ROOT: ${HOST_DATA_ROOT:-/mnt/grishcord}
+      UPLOADS_DIR: ${HOST_DATA_ROOT:-/mnt/grishcord}/uploads
       RETENTION_THRESHOLD_PCT: ${RETENTION_THRESHOLD_PCT}
       RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES}
     volumes:
-      - /mnt/grishcord/uploads:/mnt/grishcord/uploads
+      - ${HOST_DATA_ROOT:-/mnt/grishcord}/uploads:${HOST_DATA_ROOT:-/mnt/grishcord}/uploads
       - ./VERSION:/app/VERSION:ro
     depends_on:
       postgres:
