@@ -328,6 +328,11 @@ configure_env_wizard() {
     fi
   fi
 
+  if [[ -z "${current_bootstrap// }" ]] || is_placeholder_like "$current_bootstrap" || [[ ${#current_bootstrap} -lt 32 ]]; then
+    current_bootstrap="$(generate_secure_hex 32)"
+    log "Generated secure BOOTSTRAP_ROOT_TOKEN"
+  fi
+
   db_user="$(get_env_key POSTGRES_USER || true)"
   db_name="$(get_env_key POSTGRES_DB || true)"
   db_user="${db_user:-grishcord}"
