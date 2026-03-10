@@ -356,13 +356,13 @@ function auth(req, res, next) {
   }
 }
 
-async function enforceSessionVersion(req, res, next) {
+const enforceSessionVersion = asyncRoute(async (req, res, next) => {
   const { rows } = await pool.query('SELECT id, session_version, disabled, username, display_name, display_color, is_admin, notification_sounds_enabled FROM users WHERE id = $1', [req.user.sub]);
   const user = rows[0];
   if (!user || user.disabled || user.session_version !== req.user.sv) return res.status(401).json({ error: 'session_expired' });
   req.userDb = user;
   next();
-}
+});
 
 function userCanAdmin(user) {
   return Boolean(user && (user.username === ADMIN_USERNAME || user.is_admin));
@@ -878,7 +878,7 @@ app.post('/api/messages', auth, enforceSessionVersion, asyncRoute(async (req, re
   const created = await createNotificationsForMessage(enriched, req.userDb);
   for (const n of created) {
     for (const c of wss.clients) {
-      if (!ensureSocketAuthorizedForSend(c) || Number(c.userId || 0) !== Number(n.user_id)) continue;
+      if (!(await ensureSocketAuthorizedForSend(c, { validateSocketAuthState })) || Number(c.userId || 0) !== Number(n.user_id)) continue;
       c.send(JSON.stringify({
         type: 'notification',
         data: {
@@ -1349,14 +1349,6 @@ app.get('/api/messages/:id', auth, enforceSessionVersion, asyncRoute(async (req,
   const peer = Number(m.author_id) === me ? Number(m.dm_peer_id) : Number(m.author_id);
   res.json({ id: Number(m.id), channelId: null, dmPeerId: peer });
 }));
-
-
-app.use((err, _req, res, _next) => {
-  if (res.headersSent) return;
-  if (err instanceof HttpError) return res.status(err.status).json({ error: err.code });
-  console.error('request error', err?.message || err);
-  return res.status(500).json({ error: 'internal_error' });
-});
 
 
 app.use((err, _req, res, _next) => {

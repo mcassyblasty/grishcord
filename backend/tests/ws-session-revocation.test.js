@@ -72,6 +72,11 @@ test('defensive outbound check closes stale/unauthorized sockets', async () => {
   assert.equal(stale.closeReason, 'session_revoked');
 });
 
+
+test('notification fan-out awaits async socket auth helper', () => {
+  assert.match(source, /for \(const n of created\) \{[\s\S]*for \(const c of wss\.clients\) \{[\s\S]*await ensureSocketAuthorizedForSend\(c, \{ validateSocketAuthState \}\)/);
+  assert.doesNotMatch(source, /for \(const n of created\) \{[\s\S]*for \(const c of wss\.clients\) \{[\s\S]*!ensureSocketAuthorizedForSend\(c\)/);
+});
 test('backend wires revocation hooks and outbound defensive checks', () => {
   assert.match(source, /revokeSocketsForUser\(wss, data\.sub, \{ reason: 'session_revoked' \}\)/);
   assert.match(source, /if \(disabled\) revokeSocketsForUser\(wss, targetId, \{ reason: 'user_disabled' \}\)/);

@@ -56,6 +56,15 @@ test('message/edit/upload/notification routes reject malformed ids before data a
   assert.match(source, /app\.delete\('\/api\/notifications\/:id'.*parsePositiveId\(req\.params\.id, 'id'\)/s);
   assert.match(source, /app\.get\('\/api\/messages\/:id'.*parsePositiveId\(req\.params\.id, 'id'\)/s);
 });
+
+test('enforceSessionVersion is routed through async error wrapper', () => {
+  assert.match(source, /const enforceSessionVersion = asyncRoute\(async \(req, res, next\) => \{/);
+});
+
+test('there is exactly one terminal error middleware block', () => {
+  const matches = source.match(/app\.use\(\(err, _req, res, _next\) => \{/g) || [];
+  assert.equal(matches.length, 1);
+});
 test('centralized error middleware returns safe non-leaky response', () => {
   assert.match(source, /app\.use\(\(err, _req, res, _next\) => \{/);
   assert.match(source, /if \(err instanceof HttpError\) return res\.status\(err\.status\)\.json\(\{ error: err\.code \}\)/);

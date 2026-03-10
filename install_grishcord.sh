@@ -538,7 +538,7 @@ configure_ai() {
 
   log "AI setup selected: this will install/configure Ollama and set up GrishBot for Dockerized access."
   log "Configuring Ollama in docker mode so the bot can reach it via host.docker.internal:11434."
-  "$APP_DIR/scripts/ollamactrl.sh" install --bind-mode docker
+  "$APP_DIR/scripts/aibotctl.sh" ollama install --bind-mode docker
 
   BOT_USERNAME="$(prompt 'Bot username' "${BOT_USERNAME:-grishbot}")"
   BOT_DISPLAY_NAME="$(prompt 'Bot display name' "${BOT_DISPLAY_NAME:-Grish Bot}")"
