@@ -318,6 +318,10 @@ configure_env_wizard() {
     current_site="$(normalize_hostname "$current_base")"
   fi
 
+  data_root_input="$(prompt 'Where should Grishcord DB be located?' "${DATA_ROOT:-/mnt/grishcord/}")"
+  DATA_ROOT="${data_root_input%/}"
+  [[ -n "${DATA_ROOT// }" ]] || { err "DB location cannot be empty."; exit 1; }
+
   site_input="$(prompt 'Public hostname (no scheme/path)' "${current_site:-}")"
   site_host="$(normalize_hostname "$site_input")"
   if [[ -z "${site_host// }" ]]; then
@@ -329,6 +333,10 @@ configure_env_wizard() {
     if [[ -n "${current_db_pass// }" ]] && ! is_placeholder_like "$current_db_pass"; then
       postgres_password="$current_db_pass"
       log "Keeping existing POSTGRES_PASSWORD from .env"
+    elif db_filesystem_looks_existing; then
+      err "Existing DB files were detected under $DATA_ROOT/postgres but POSTGRES_PASSWORD is missing/placeholder."
+      err "Provide the existing Postgres password so the installer can safely reuse the DB."
+      exit 1
     else
       err "Existing DB install requires a valid POSTGRES_PASSWORD in $ENV_FILE."
       exit 1
@@ -882,6 +890,30 @@ main() {
 
   configure_env_wizard
   preflight_compose_sanity
+
+  if db_filesystem_looks_existing; then
+    log "Existing DB files detected under $DATA_ROOT/postgres; validating existing install state."
+    docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d postgres
+    if ! wait_postgres_ready 60; then
+      err "Postgres did not become ready while checking existing DB state."
+      exit 1
+    fi
+    detect_existing_admin_from_db
+  else
+    INSTALL_MODE="fresh"
+    DETECTED_ADMIN_USERNAME=""
+  fi
+
+  if [[ "$INSTALL_MODE" == "existing" ]]; then
+    EXISTING_ADMIN_DB="Y"
+    ROOT_ADMIN_USERNAME="$DETECTED_ADMIN_USERNAME"
+    ROOT_ADMIN_DISPLAY_NAME="$DETECTED_ADMIN_USERNAME"
+    set_env_key ADMIN_USERNAME "$ROOT_ADMIN_USERNAME"
+    log "Detected existing admin account: $ROOT_ADMIN_USERNAME"
+  else
+    EXISTING_ADMIN_DB="N"
+    prompt_fresh_admin_setup
+  fi
 
   log "Starting/upgrading core compose services"
   docker compose --project-directory "$APP_DIR" --env-file "$ENV_FILE" up -d --build --remove-orphans postgres backend frontend caddy
