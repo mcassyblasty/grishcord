@@ -11,6 +11,7 @@ Minimal private Discord-like web app scaffold with Docker Compose and Postgres.
 
 ### `./install_grishcord.sh` interactive bootstrap
 The installer asks for:
+- Install intent (`normal` rerun/reconfigure vs `replace-source` to refresh app code from git/archive while preserving DB/data)
 - Grishcord repo location, DB data root, and repo source (git/wget/curl/local-archive)
 - If `git` source: git URL
 - Public hostname (used for `CADDY_SITE_ADDRESS`, `PUBLIC_BASE_URL`, `CORS_ORIGINS`)
@@ -20,8 +21,8 @@ The installer asks for:
 - Existing installs: installer prompts for detected admin password and verifies against stored DB hash before continuing to full stack startup (wrong password retries)
 - Fresh installs: installer prompts for new admin username/display name/password
 - Optional AI enablement (Ollama + bot account)
-- If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts
-- If UFW is active and AI enabled: whether to apply Docker-subnet-to-Ollama allow rules
+- If AI enabled: bot username/display name/password/color, plus Ollama install/config prompts for the single secure local endpoint
+- AI install defaults the Ollama models path to `${HOST_DATA_ROOT}/models`, lists already-installed models before the model prompt, and skips re-pulling a model that is already present
 
 It writes non-secret rerun defaults to `.install.env` and runtime values to `.env`.
 When needed, installer auto-generates secure `JWT_SECRET`, `BOOTSTRAP_ROOT_TOKEN`, and `POSTGRES_PASSWORD` values during the wizard.
@@ -40,7 +41,7 @@ Re-run safely at any time:
 - `./scripts/grishcordctl.sh restart` (recreate backend/frontend/bot/caddy so `.env` changes apply, then wait for readiness)
 - `./scripts/grishcordctl.sh stop` (verbose stop)
 - `./scripts/grishcordctl.sh update-start` (pull, rebuild, start with live timers)
-- `./scripts/grishcordctl.sh status` (compose status + LAN URL)
+- `./scripts/grishcordctl.sh status` (compose status + canonical URL hints)
 - `./scripts/grishcordctl.sh logs` (recent stack logs)
 - `./scripts/grishcordctl.sh doctor` (check prerequisites + compose diagnostics)
 - `make install-sanity` (runs lightweight installer helper sanity checks; temp files + mocked calls, no burn-in/stress)
@@ -120,26 +121,19 @@ You can still use the legacy top-level aliases (`install|update|start|stop`) for
 `install` and `update` use:
 - `curl -fsSL https://ollama.com/install.sh | sh`
 
-`install` writes host-local Ollama settings to `.ollama.env` (model path and model name), configures systemd override, and keeps Ollama bound to `127.0.0.1:11434`.
+`install` writes host-local Ollama settings to `.ollama.env` (model path, model name, and resolved secure endpoint), configures the systemd override, and binds Ollama to a Docker-bridge-only host address that local containers can reach without exposing port `11434` on public/LAN interfaces. If Ollama is already installed, `aibotctl` checks the installed version against the latest release before downloading again.
+When `HOST_DATA_ROOT` is set by the main installer, `aibotctl` defaults Ollama models to `${HOST_DATA_ROOT}/models` and will reuse already-installed models instead of blindly pulling again.
 
+### Ollama secure endpoint
+Grishcord now supports one Ollama networking path:
 
-### Ollama networking modes (secure vs docker)
-`./scripts/aibotctl.sh` supports two bind modes and persists your choice in `.ollama.env` (`OLLAMA_BIND_MODE`):
-
-- **secure** (default): Ollama binds to `127.0.0.1:11434`.
-  - Best default for host security.
-  - A bot container cannot reach host-loopback through `host.docker.internal`.
-  - Use this mode when the bot runs on the host network/process namespace (or outside Docker on the host).
-
-- **docker**: Ollama binds to `0.0.0.0:11434`.
-  - Needed for standard Docker bridge access from the bot container using `http://host.docker.internal:11434`.
-  - Keep access restricted with host firewall/network policy so only local host + Docker networks can reach port `11434`.
-  - Do **not** expose port `11434` to public networks.
-
-The bot compose service is already configured with `extra_hosts: ["host.docker.internal:host-gateway"]` and defaults to `OLLAMA_BASE_URL=http://host.docker.internal:11434`.
+- Ollama binds to a secure host-local Docker bridge address on port `11434`.
+- The Dockerized bot reads `OLLAMA_BASE_URL` from `.ollama.env`.
+- The installer and `aibotctl` keep `.ollama.env` and runtime config synchronized automatically.
+- Old `host.docker.internal`, `0.0.0.0:11434`, and `OLLAMA_BIND_MODE` installs are normalized forward on rerun/update.
 
 `aibotctl` now waits for the Ollama API to become ready before model pulls, reducing restart/pull race failures.
-The bot also performs an Ollama preflight (`GET /api/tags`) at startup and before first generation, and logs actionable firewall guidance if unreachable.
+The bot also performs an Ollama preflight (`GET /api/tags`) at startup and before first generation, and logs actionable secure-endpoint guidance if unreachable.
 
 ### Configure bot identity/runtime defaults
 Use:
@@ -167,6 +161,8 @@ Set `BOT_PASSWORD` in your runtime compose environment (for example `.env` on th
 ### Edit system prompt
 Edit `bot/prompts/system.txt`.
 - The bot reads this file at runtime when generating replies.
+- The bot sends Ollama one JSON snapshot of the current DM/channel window and expects plain-text reply text back.
+- If a trigger replies to an older GrishBot message, that older bot message is promoted into `priority_context.replied_to_bot_message` so the model can weight it just below the trigger itself.
 - No rebuild is required by default because compose mounts only `bot/prompts/` to `/config/bot/prompts/` for the bot container. Restart the bot service after edits if needed.
 - Bot container mounts are intentionally minimal (`bot/prompts/`, `.aibot.env`, `.ollama.env`) and do not include the full repo tree.
 
@@ -175,13 +171,13 @@ Required:
 - `GRISHCORD_BASE_URL` (default: `http://backend:3000`)
 - `BOT_USERNAME`
 - `BOT_PASSWORD`
-- `OLLAMA_BASE_URL` (default in compose: `http://host.docker.internal:11434`)
+- `OLLAMA_BASE_URL` (stored in `.ollama.env` by `aibotctl`)
 - `OLLAMA_MODEL`
 
 Optional:
-- `BOT_OLLAMA_TIMEOUT_MS` (default `30000`)
+- `BOT_OLLAMA_TIMEOUT_MS` (default `180000`)
 - `BOT_MAX_REPLY_CHARS` (default `1800`)
-- `BOT_CONTEXT_MAX_MESSAGES` (default `10`)
+- `BOT_CONTEXT_MAX_MESSAGES` (default `12`)
 - `BOT_RATE_LIMIT_MS` (default `2000`)
 - `BOT_MAX_CONCURRENCY_PER_CHANNEL` (default `1`)
 - `BOT_PROMPT_FILE` (default `/config/bot/prompts/system.txt`)
@@ -189,6 +185,8 @@ Optional:
 - `BOT_ENABLE_CHANNELS` (default `true`)
 - `BOT_ALLOWED_CHANNEL_IDS` (optional comma-separated channel id allowlist)
 - `BOT_REPLY_ON_ERROR` (default `false`; send a short fallback reply on timeout/error/empty output)
+- The bot now waits silently for longer Ollama generations by default and logs request lifecycle details; it only sends fallback text when `BOT_REPLY_ON_ERROR=true`.
+- On startup the bot preloads its configured Ollama model and sends `keep_alive: -1` on bot-owned requests so that model stays resident when Ollama remains healthy.
 
 ### Manual verification checklist (acceptance)
 1. Start Grishcord + bot (`./scripts/grishcordctl.sh start`) and confirm bot logs show successful login and WebSocket connection.
@@ -200,5 +198,6 @@ Optional:
 
 ## Root admin protection
 - The installer sets `ADMIN_USERNAME` in `.env` to the chosen root admin username.
+- Backend stores the owner as `users.is_root_admin=true`; `ADMIN_USERNAME` is bootstrap/backfill config only.
 - Backend enforces this root admin as non-demotable/non-deletable through admin APIs.
 - Other admins cannot revoke root-admin authority server-side.

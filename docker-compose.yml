@@ -24,12 +24,19 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       BOOTSTRAP_ROOT_TOKEN: ${BOOTSTRAP_ROOT_TOKEN}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS}
       COOKIE_SECURE: ${COOKIE_SECURE}
       HOST_DATA_ROOT: ${HOST_DATA_ROOT:-/mnt/grishcord}
       UPLOADS_DIR: ${HOST_DATA_ROOT:-/mnt/grishcord}/uploads
       RETENTION_THRESHOLD_PCT: ${RETENTION_THRESHOLD_PCT}
+      STORAGE_PROTECT_THRESHOLD_PCT: ${STORAGE_PROTECT_THRESHOLD_PCT}
       RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES}
+      UNATTACHED_UPLOAD_TTL_MS: ${UNATTACHED_UPLOAD_TTL_MS}
+      UPLOAD_REAP_BATCH: ${UPLOAD_REAP_BATCH}
+      AUTH_RATE_LIMIT_MAX_BUCKETS: ${AUTH_RATE_LIMIT_MAX_BUCKETS}
+      AUTH_RATE_LIMIT_SWEEP_MS: ${AUTH_RATE_LIMIT_SWEEP_MS}
     volumes:
       - ${HOST_DATA_ROOT:-/mnt/grishcord}/uploads:${HOST_DATA_ROOT:-/mnt/grishcord}/uploads
       - ./VERSION:/app/VERSION:ro
@@ -72,12 +79,10 @@ services:
       BOT_PASSWORD: ${BOT_PASSWORD:-}
       BOT_DISPLAY_NAME: ${BOT_DISPLAY_NAME:-}
       BOT_COLOR: ${BOT_COLOR:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
-      BOT_OLLAMA_TIMEOUT_MS: ${BOT_OLLAMA_TIMEOUT_MS:-30000}
+      BOT_OLLAMA_TIMEOUT_MS: ${BOT_OLLAMA_TIMEOUT_MS:-180000}
       BOT_MAX_REPLY_CHARS: ${BOT_MAX_REPLY_CHARS:-1800}
-      BOT_CONTEXT_MAX_MESSAGES: ${BOT_CONTEXT_MAX_MESSAGES:-10}
-      BOT_CONVO_TTL_MS: ${BOT_CONVO_TTL_MS:-900000}
+      BOT_CONTEXT_MAX_MESSAGES: ${BOT_CONTEXT_MAX_MESSAGES:-12}
       BOT_RATE_LIMIT_MS: ${BOT_RATE_LIMIT_MS:-2000}
       BOT_MAX_CONCURRENCY_PER_CHANNEL: ${BOT_MAX_CONCURRENCY_PER_CHANNEL:-1}
       BOT_PROMPT_FILE: ${BOT_PROMPT_FILE:-/config/bot/prompts/system.txt}
@@ -87,8 +92,6 @@ services:
       - ./bot/prompts:/config/bot/prompts:ro
       - ./.aibot.env:/config/.aibot.env:ro
       - ./.ollama.env:/config/.ollama.env:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
